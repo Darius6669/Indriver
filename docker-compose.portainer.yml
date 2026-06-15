@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  indriver-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: indriver-backend
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    environment:
+      USER_NAME: postgres
+      PASSWORD_BD: "123456"
+      HOST_BD: 192.168.100.100
+      PORT_BD: 5432
+      DB_NAME: trasporte
+    networks:
+      - indriver-network
+
+networks:
+  indriver-network:
+    driver: bridge
