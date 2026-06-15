@@ -25,7 +25,7 @@ export class WebsocketGateway implements OnGatewayInit, OnGatewayConnection, OnG
     socket: Socket;
     interval: NodeJS.Timeout;
     lastLocation: { lat: number; lng: number; route: string };
-    driverInfo?: any; // 👈 Para luego integrar con tu DB
+    driverInfo?: any; //Para luego integrar con tu DB
   }>();
 
   afterInit(server: Server) {
@@ -136,7 +136,7 @@ export class WebsocketGateway implements OnGatewayInit, OnGatewayConnection, OnG
       };
     }
 
-    // 📢 Notificar a TODOS los pasajeros
+    //Notificar a TODOS los pasajeros
     this.server.emit('bus_location_update', {
       busId: data.busId,
       lat: data.lat,
@@ -197,7 +197,7 @@ export class WebsocketGateway implements OnGatewayInit, OnGatewayConnection, OnG
       
       this.logger.log('Bus:' ,busId,'en:', currentLat.toFixed(6), currentLng.toFixed(6));
       
-      // 📢 ENVIAR A TODOS LOS PASAJEROS
+      //ENVIAR A TODOS LOS PASAJEROS
       this.server.emit('bus_location_update', {
         busId: busId,
         lat: currentLat,
@@ -223,7 +223,7 @@ export class WebsocketGateway implements OnGatewayInit, OnGatewayConnection, OnG
       driverInfo: driverInfo // 👈 Listo para tu DB
     });
 
-    // 📢 Notificar a TODOS los pasajeros del nuevo bus
+    //Notificar a TODOS los pasajeros del nuevo bus
     this.server.emit('new_bus_available', { 
       busId: busId, 
       route: route,
@@ -231,7 +231,7 @@ export class WebsocketGateway implements OnGatewayInit, OnGatewayConnection, OnG
       timestamp: new Date().toISOString()
     });
 
-    // ✅ Confirmar al conductor
+    // Confirmar al conductor
     client.emit('tracking_started', {
       success: true,
       busId: busId,
@@ -249,7 +249,7 @@ export class WebsocketGateway implements OnGatewayInit, OnGatewayConnection, OnG
       this.activeBuses.delete(busId);
       this.logger.log('Tracking detenido para: ',busId);
       
-      // 📢 Notificar a TODOS los pasajeros que el bus se fue
+      //Notificar a TODOS los pasajeros que el bus se fue
       this.server.emit('bus_disconnected', { 
         busId,
         timestamp: new Date().toISOString()

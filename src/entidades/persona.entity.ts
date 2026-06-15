@@ -2,33 +2,33 @@ import { Column, Entity, PrimaryColumn } from "typeorm";
 import { IsEmail, IsNotEmpty, Min, Max } from 'class-validator';
 
 
-@Entity('Persona')
+@Entity('persona')
 export class PersonaEntity {
     @PrimaryColumn({ type: 'varchar', length: 50 })
     @IsNotEmpty()
-    Cedula : string;
+    cedula !: string;
 
     @Column({ type: 'varchar', length: 50 })   
     @IsNotEmpty()
-    Nombre : string;
+    nombre !: string;
 
     @Column({ type: 'varchar', length: 50 }) 
     @IsNotEmpty()
-    Apellido : string;
+    apellido !: string;
 
     @Column({ type: 'varchar', length: 50 }) 
     @IsNotEmpty()
     @IsEmail()
-    Email : string;
+    email !: string;
 
     @Column({ type: 'varchar', length: 12 }) 
     @IsNotEmpty()
-    Telefono : string;
+    telefono !: string;
 
 
     @Column({ type: 'int' }) 
     @IsNotEmpty()
     @Min(18)
     @Max(130)
-    Edad : number;
+    edad !: number;
 }

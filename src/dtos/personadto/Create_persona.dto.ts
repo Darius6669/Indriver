@@ -15,29 +15,29 @@ export class CreatePersonaDto {
   @MinLength(8)
   @MaxLength(20)
   @Matches(/^[0-9]+$/, { message: 'La cédula debe contener solo números' })
-  cedula: string;
+  cedula!: string;
 
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  nombre: string;
+  nombre!: string;
 
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  apellido: string;
+  apellido!: string;
 
   @IsEmail()
   @IsNotEmpty()
   @MaxLength(50)
-  email: string;
+  email!: string;
 
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  telefono : string;
+  telefono!: string;
 
   @IsInt()
   @IsNotEmpty()
-  edad: number;
+  edad!: number;
 }

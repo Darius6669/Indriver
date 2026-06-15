@@ -9,7 +9,7 @@ import { CoperativaModule } from './coperativa/coperativa.module';
 import { VehiculosModule } from './vehiculos/vehiculos.module';
 import { PuntosControlModule } from './puntos-control/puntos-control.module';
 import { ViajesModule } from './viajes/viajes.module';
-
+import { PersonasModule } from './personas/personas.module';
 @Module({
   imports: [  ConfigModule.forRoot({
     isGlobal: true,
@@ -30,6 +30,7 @@ import { ViajesModule } from './viajes/viajes.module';
     CoperativaModule,
     VehiculosModule,
     PuntosControlModule,
+    PersonasModule,
     ViajesModule],
   controllers: [AppController],
   providers: [AppService],
