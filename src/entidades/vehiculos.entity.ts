@@ -1,31 +1,35 @@
 import { Column, Entity, JoinColumn, ManyToMany, ManyToOne, OneToMany, PrimaryColumn } from "typeorm";
 import { IsEmail, IsNotEmpty, Min, Max } from 'class-validator';
 import { CooperativaEntity } from "./cooperativa.entity";
+import { ViajesEntity } from "./Viajes.entity";
 
 @Entity('vehiculos')
 export class VehiculosEntity{
 
     @PrimaryColumn({ type: 'varchar', length: 50 })
     @IsNotEmpty()
-    placa : string;
+    placa !: string;
 
 
     @Column({ type: 'varchar', length: 50 })   
     @IsNotEmpty()
-    modelo : string;
+    modelo !: string;
 
 
     @Column({ type: 'varchar', length: 50 })   
     @IsNotEmpty()
-    color : string;
+    color !: string;
 
 
     @Column({ type: 'timestamp'})   
     @IsNotEmpty()
-    anofabricacion : Date;
+    anofabricacion !: Date;
 
     @ManyToOne(() => CooperativaEntity, cooperativa => cooperativa.unidad)
     @JoinColumn({ name: 'cooperativa_id'})
-    cooperativa: CooperativaEntity;
+    cooperativa !: CooperativaEntity;
+
+    @OneToMany(() => ViajesEntity, (viaje) => viaje.vehiculo)
+    viajes !: ViajesEntity[];
     
 }

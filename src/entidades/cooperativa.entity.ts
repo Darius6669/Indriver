@@ -7,33 +7,33 @@ import { VehiculosEntity } from "./vehiculos.entity";
 export class CooperativaEntity {
     @PrimaryColumn({ type: 'varchar', length: 50 })
     @IsNotEmpty()
-    rif_cooperativa : string;
+    rif_cooperativa !: string;
 
 
     @Column({ type: 'varchar', length: 50 })   
     @IsNotEmpty()
-    nombre : string;
+    nombre !: string;
 
 
     @Column({ type: 'varchar', length: 100 }) 
     @IsNotEmpty()
-    ubicacion : string;
+    ubicacion !: string;
 
 
     @Column({ type: 'varchar'})
     @IsNotEmpty()
-    descripcion : string;
+    descripcion !: string;
 
 
     @Column({ type: 'varchar' })
     @IsNotEmpty()
-    horario : string;
+    horario !: string;
 
 
     @OneToMany(() => RutaEntity, ruta => ruta.cooperativa)
-    rutas: RutaEntity[];
+    rutas !: RutaEntity[];
 
 
     @OneToMany(() => VehiculosEntity, vehiculo => vehiculo.cooperativa)
-    unidad: VehiculosEntity[];
+    unidad !: VehiculosEntity[];
 }
