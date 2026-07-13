@@ -127,7 +127,7 @@ export class ViajesService {
             viaje.fecha_inicio = updateviajeDto.fecha_inicio ?? viaje.fecha_inicio
             viaje.fecha_final = updateviajeDto.fecha_final ?? viaje.fecha_final
             viaje.lactitud = updateviajeDto.lactitud ?? viaje.lactitud
-            viaje.longitud = updateviajeDto.lactitud ?? viaje.longitud
+            viaje.longitud = updateviajeDto.longitud ?? viaje.longitud
             
             if(updateviajeDto.usuario !== undefined){
                 viaje.usuario = { user_id: updateviajeDto.usuario } as UsuariosEntity;
