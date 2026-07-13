@@ -11,6 +11,7 @@ import { PuntosControlModule } from './puntos-control/puntos-control.module';
 import { ViajesModule } from './viajes/viajes.module';
 import { PersonasModule } from './personas/personas.module';
 import { IncidenciasModule } from './incidencias/incidencias.module';
+import { UsuariosModule } from './usuarios/usuarios.module';
 @Module({
   imports: [  ConfigModule.forRoot({
     isGlobal: true,
@@ -33,7 +34,8 @@ import { IncidenciasModule } from './incidencias/incidencias.module';
     PuntosControlModule,
     PersonasModule,
     ViajesModule,
-    IncidenciasModule],
+    IncidenciasModule,
+    UsuariosModule],
   controllers: [AppController],
   providers: [AppService],
 })

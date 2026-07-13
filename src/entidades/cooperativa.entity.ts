@@ -2,6 +2,7 @@ import { Column, Entity, ManyToMany, ManyToOne, OneToMany, PrimaryColumn } from 
 import { IsEmail, IsNotEmpty, Min, Max } from 'class-validator';
 import { RutaEntity } from "./ruta.entity";
 import { VehiculosEntity } from "./vehiculos.entity";
+import { UsuariosEntity } from "./Usuarios.entity";
 
 @Entity('cooperativa')
 export class CooperativaEntity {
@@ -36,4 +37,7 @@ export class CooperativaEntity {
 
     @OneToMany(() => VehiculosEntity, vehiculo => vehiculo.cooperativa)
     unidad !: VehiculosEntity[];
+
+    @OneToMany(() => UsuariosEntity, usuario => usuario.cooperativa)
+    usuarios !: UsuariosEntity[];
 }

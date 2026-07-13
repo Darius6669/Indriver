@@ -145,7 +145,7 @@ export class ViajesService {
                 viaje.incidencia = {incidencias_id: updateviajeDto.incidencia_id} as IncidenciasEntity 
             }
             const update = await this.viajesRepository.save(viaje)
-            return await this.ObtenerVijesId(viaje.id_viaje)
+            return await this.ObtenerVijesId(update.id_viaje)
         }
        throw new NotFoundException(`El viaje con id ${id_viaje} no encontrado.`);
     }

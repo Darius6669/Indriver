@@ -1,6 +1,8 @@
-import { Column, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryColumn, PrimaryGeneratedColumn } from "typeorm";
+import { Column, Entity, JoinColumn, ManyToOne, OneToMany, OneToOne, PrimaryColumn, PrimaryGeneratedColumn } from "typeorm";
 import { IsEmail, IsNotEmpty, Min, Max } from 'class-validator';
 import { ViajesEntity } from "./Viajes.entity";
+import { PersonaEntity } from "./persona.entity";
+import { CooperativaEntity } from "./cooperativa.entity";
 
 @Entity('usuario')
 export class UsuariosEntity{
@@ -23,5 +25,13 @@ export class UsuariosEntity{
 
     @OneToMany(() => ViajesEntity, (viaje) => viaje.usuario)
     viajes !: ViajesEntity[];
+    
+    @OneToOne(() => PersonaEntity, (persona) => persona.usuarios)
+    @JoinColumn({ name: 'cedula_id' })
+    persona !: PersonaEntity;
+
+    @ManyToOne(() => CooperativaEntity, cooperativa => cooperativa.usuarios)
+    @JoinColumn({ name: 'cooperativa_id' })
+    cooperativa !: CooperativaEntity;
 
 }

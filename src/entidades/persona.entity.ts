@@ -1,5 +1,7 @@
-import { Column, Entity, PrimaryColumn } from "typeorm";
+import { Column, Entity, JoinColumn, OneToMany, OneToOne, PrimaryColumn } from "typeorm";
 import { IsEmail, IsNotEmpty, Min, Max } from 'class-validator';
+import { on } from "events";
+import { UsuariosEntity } from "./Usuarios.entity";
 
 
 @Entity('persona')
@@ -31,4 +33,7 @@ export class PersonaEntity {
     @Min(18)
     @Max(130)
     edad !: number;
+
+    @OneToOne(() => UsuariosEntity, (usuario) => usuario.persona)
+    usuarios !: UsuariosEntity;
 }
