@@ -12,6 +12,7 @@ import { ViajesModule } from './viajes/viajes.module';
 import { PersonasModule } from './personas/personas.module';
 import { IncidenciasModule } from './incidencias/incidencias.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
+import { AuthModule } from './auth/auth.module';
 @Module({
   imports: [  ConfigModule.forRoot({
     isGlobal: true,
@@ -35,7 +36,8 @@ import { UsuariosModule } from './usuarios/usuarios.module';
     PersonasModule,
     ViajesModule,
     IncidenciasModule,
-    UsuariosModule],
+    UsuariosModule,
+    AuthModule],
   controllers: [AppController],
   providers: [AppService],
 })

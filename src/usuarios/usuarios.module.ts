@@ -16,5 +16,6 @@ import { CooperativaEntity } from 'src/entidades/cooperativa.entity';
   ],
   controllers: [UsuariosController],
   providers: [UsuariosService],
+  exports: [UsuariosService]
 })
 export class UsuariosModule {}

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { HttpException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateUsuarioDTO } from 'src/dtos/usuarios/Create_usuario.dto';
@@ -30,12 +30,12 @@ export class UsuariosService {
         return cooperativa;
     }
 
-    async validarUsuario(username: string): Promise<boolean>{
+    async validarUsuario(username: string): Promise<UsuariosEntity>{
         const usuario = await this.usuariosRepository.findOne({where:{username:username}})
-        if(usuario){
-            return true;
+        if(!usuario){
+            throw new HttpException(`El usuario con username ${username} no esta registrado.`,404);
         }
-        return false;
+        return usuario;
     }
 
     async EncriptarPassword(password: string): Promise<string>{
@@ -59,7 +59,7 @@ export class UsuariosService {
                 Usuario.username = createUsuarioDTO.username;
                 Usuario.contrasena = await this.EncriptarPassword(createUsuarioDTO.contrasena);
                 Usuario.rol = createUsuarioDTO.rol;
-                Usuario.status = createUsuarioDTO.status;
+                Usuario.status = true;
                 Usuario.persona = persona;
                 Usuario.cooperativa = cooperativa;
                 return this.usuariosRepository.save(Usuario);
