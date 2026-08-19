@@ -38,6 +38,11 @@ export class UsuariosService {
         return usuario;
     }
 
+     async ExisteUsuario(username: string): Promise<boolean>{
+        const usuario = await this.usuariosRepository.findOne({where:{username:username}})
+        return !!usuario;
+    }
+
     async EncriptarPassword(password: string): Promise<string>{
         const salto = await bcrypt.genSalt(10);
         const contrasenaEncriptada = await bcrypt.hash(password, salto);
@@ -49,7 +54,7 @@ export class UsuariosService {
     async CreateUsuario(createUsuarioDTO: CreateUsuarioDTO): Promise<UsuariosEntity> {
         const persona = await this.ValidarPersona(createUsuarioDTO.cedula_id);
         const cooperativa = await this.ValidarCooperativa(createUsuarioDTO.cooperativa_id);
-        const Existe = await this.validarUsuario(createUsuarioDTO.username);
+        const Existe = await this.ExisteUsuario(createUsuarioDTO.username);
         if(Existe){
             throw new NotFoundException(`El usuario con username ${createUsuarioDTO.username} ya esta registrado tambien podria usar su correo electronico.`);
         }
