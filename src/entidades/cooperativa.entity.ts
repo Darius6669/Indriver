@@ -1,43 +1,44 @@
-import { Column, Entity, ManyToMany, ManyToOne, OneToMany, PrimaryColumn } from "typeorm";
+import {
+  Column,
+  Entity,
+  ManyToMany,
+  ManyToOne,
+  OneToMany,
+  PrimaryColumn,
+} from 'typeorm';
 import { IsEmail, IsNotEmpty, Min, Max } from 'class-validator';
-import { RutaEntity } from "./ruta.entity";
-import { VehiculosEntity } from "./vehiculos.entity";
-import { UsuariosEntity } from "./Usuarios.entity";
+import { RutaEntity } from './ruta.entity';
+import { VehiculosEntity } from './vehiculos.entity';
+import { UsuariosEntity } from './Usuarios.entity';
 
 @Entity('cooperativa')
 export class CooperativaEntity {
-    @PrimaryColumn({ type: 'varchar', length: 50 })
-    @IsNotEmpty()
-    rif_cooperativa !: string;
+  @PrimaryColumn({ type: 'varchar', length: 50 })
+  @IsNotEmpty()
+  rif_cooperativa!: string;
 
+  @Column({ type: 'varchar', length: 50 })
+  @IsNotEmpty()
+  nombre!: string;
 
-    @Column({ type: 'varchar', length: 50 })   
-    @IsNotEmpty()
-    nombre !: string;
+  @Column({ type: 'varchar', length: 100 })
+  @IsNotEmpty()
+  ubicacion!: string;
 
+  @Column({ type: 'varchar' })
+  @IsNotEmpty()
+  descripcion!: string;
 
-    @Column({ type: 'varchar', length: 100 }) 
-    @IsNotEmpty()
-    ubicacion !: string;
+  @Column({ type: 'varchar' })
+  @IsNotEmpty()
+  horario!: string;
 
+  @OneToMany(() => RutaEntity, (ruta) => ruta.cooperativa)
+  rutas!: RutaEntity[];
 
-    @Column({ type: 'varchar'})
-    @IsNotEmpty()
-    descripcion !: string;
+  @OneToMany(() => VehiculosEntity, (vehiculo) => vehiculo.cooperativa)
+  unidad!: VehiculosEntity[];
 
-
-    @Column({ type: 'varchar' })
-    @IsNotEmpty()
-    horario !: string;
-
-
-    @OneToMany(() => RutaEntity, ruta => ruta.cooperativa)
-    rutas !: RutaEntity[];
-
-
-    @OneToMany(() => VehiculosEntity, vehiculo => vehiculo.cooperativa)
-    unidad !: VehiculosEntity[];
-
-    @OneToMany(() => UsuariosEntity, usuario => usuario.cooperativa)
-    usuarios !: UsuariosEntity[];
+  @OneToMany(() => UsuariosEntity, (usuario) => usuario.cooperativa)
+  usuarios!: UsuariosEntity[];
 }

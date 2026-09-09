@@ -1,4 +1,13 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { CooperativaService } from './coperativa.service';
 import { CreateCooperativaDto } from 'src/dtos/cooperativadto/Create_cooperativa.dto';
 import { UpdateCooperativaDto } from 'src/dtos/cooperativadto/Updatecooperativa.dto';
@@ -6,7 +15,6 @@ import { UpdateCooperativaDto } from 'src/dtos/cooperativadto/Updatecooperativa.
 @Controller('cooperativa')
 export class CoperativaController {
   constructor(private readonly cooperativaService: CooperativaService) {}
-
 
   @Post('cooperativas/crear')
   @HttpCode(HttpStatus.CREATED)
@@ -22,22 +30,27 @@ export class CoperativaController {
 
   @Post('cooperativas/filter')
   @HttpCode(HttpStatus.OK)
-  async obtenerCooperativaPorRif(@Body('rif_cooperativa') rif_cooperativa: string) {
+  async obtenerCooperativaPorRif(
+    @Body('rif_cooperativa') rif_cooperativa: string,
+  ) {
     return this.cooperativaService.ObtenercooperativaPorRif(rif_cooperativa);
   }
 
-
   @Delete('cooperativas/eliminar')
   @HttpCode(HttpStatus.OK)
-  async EliminarCooperativa(@Body('rif_cooperativa') rif_cooperativa :string){
+  async EliminarCooperativa(@Body('rif_cooperativa') rif_cooperativa: string) {
     return this.cooperativaService.EliminarCooperativa(rif_cooperativa);
   }
 
-
   @Patch('cooperativas/actualizar')
   @HttpCode(HttpStatus.OK)
-  async ActualizarCooperativa(@Body('rif_cooperativa') rif_cooperativa : string ,@Body() updateCooperativadto: any){
-    return this.cooperativaService.ActualizarCooperativa(rif_cooperativa,updateCooperativadto);
+  async ActualizarCooperativa(
+    @Body('rif_cooperativa') rif_cooperativa: string,
+    @Body() updateCooperativadto: any,
+  ) {
+    return this.cooperativaService.ActualizarCooperativa(
+      rif_cooperativa,
+      updateCooperativadto,
+    );
   }
-    
 }

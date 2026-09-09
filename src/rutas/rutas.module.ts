@@ -6,9 +6,14 @@ import { CooperativaEntity } from 'src/entidades/cooperativa.entity';
 import { ControlRutaEntity } from 'src/entidades/ControlRuta.entity';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
-
 @Module({
-  imports: [TypeOrmModule.forFeature([RutaEntity, CooperativaEntity,ControlRutaEntity])],
+  imports: [
+    TypeOrmModule.forFeature([
+      RutaEntity,
+      CooperativaEntity,
+      ControlRutaEntity,
+    ]),
+  ],
   controllers: [RutasController],
   providers: [RutasService],
 })

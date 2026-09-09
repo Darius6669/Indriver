@@ -13,21 +13,23 @@ import { PersonasModule } from './personas/personas.module';
 import { IncidenciasModule } from './incidencias/incidencias.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
 import { AuthModule } from './auth/auth.module';
+import { RolesModule } from './Roles/roles.module';
 @Module({
-  imports: [  ConfigModule.forRoot({
-    isGlobal: true,
-    envFilePath: '.env',
-  }),
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env',
+    }),
     TypeOrmModule.forRoot({
-    type: 'postgres',
-    host: process.env.HOST_BD,
-    port: process.env.PORT_BD ? parseInt(process.env.PORT_BD) : 5432,
-    username:process.env.USER_NAME,
-    password : process.env.PASSWORD_BD,
-    database : process.env.DB_NAME,
-    entities: [__dirname + '/**/*.entity{.ts,.js}'],
-    synchronize : false
-  }),
+      type: 'postgres',
+      host: process.env.HOST_BD,
+      port: process.env.PORT_BD ? parseInt(process.env.PORT_BD) : 5432,
+      username: process.env.USER_NAME,
+      password: process.env.PASSWORD_BD,
+      database: process.env.DB_NAME,
+      entities: [__dirname + '/**/*.entity{.ts,.js}'],
+      synchronize: false,
+    }),
     WebsocketModule,
     RutasModule,
     CoperativaModule,
@@ -37,7 +39,9 @@ import { AuthModule } from './auth/auth.module';
     ViajesModule,
     IncidenciasModule,
     UsuariosModule,
-    AuthModule],
+    AuthModule,
+    RolesModule
+  ],
   controllers: [AppController],
   providers: [AppService],
 })

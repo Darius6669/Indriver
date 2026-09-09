@@ -1,26 +1,26 @@
-import { 
-  IsString, 
-  IsEmail, 
-  IsNotEmpty, 
-  MinLength, 
+import {
+  IsString,
+  IsEmail,
+  IsNotEmpty,
+  MinLength,
   MaxLength,
   IsInt,
   IsOptional,
-  Matches
+  Matches,
 } from 'class-validator';
 
-export class UpdateIncidenciasDto{
-    @IsString()
-    @IsNotEmpty()
-    @MinLength(50)
-    @MaxLength(500)
-    @IsOptional()
-    descripcion ?: string;
+export class UpdateIncidenciasDto {
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(50)
+  @MaxLength(500)
+  @IsOptional()
+  descripcion?: string;
 
-    @IsString()
-    @IsNotEmpty()
-    @MinLength(50)
-    @MaxLength(500)
-    @IsOptional()
-    estado ?: string;
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(50)
+  @MaxLength(500)
+  @IsOptional()
+  estado?: string;
 }

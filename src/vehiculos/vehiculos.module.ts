@@ -6,7 +6,7 @@ import { VehiculosEntity } from 'src/entidades/vehiculos.entity';
 import { CooperativaEntity } from 'src/entidades/cooperativa.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([VehiculosEntity,CooperativaEntity])],
+  imports: [TypeOrmModule.forFeature([VehiculosEntity, CooperativaEntity])],
   controllers: [VehiculosController],
   providers: [VehiculosService],
 })

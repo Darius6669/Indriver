@@ -10,11 +10,12 @@ import { jwtConstants } from './constans';
 
 @Module({
   imports: [
-    UsuariosModule,// Importa el módulo de usuarios para poder usar el servicio de usuarios
+    UsuariosModule, // Importa el módulo de usuarios para poder usar el servicio de usuarios
     PassportModule, // Importa el módulo de Passport para la autenticación
-    JwtModule.register({ // Configura el módulo de JWT
+    JwtModule.register({
+      // Configura el módulo de JWT
       secret: jwtConstants.secret, // variable de entorno para la semilla del JWT
-      signOptions: { expiresIn: '1h' },// Tiempo de vida del token mas adelante le pondre 24 horas
+      signOptions: { expiresIn: '1h' }, // Tiempo de vida del token mas adelante le pondre 24 horas
     }),
   ],
   controllers: [AuthController],

@@ -1,32 +1,28 @@
-import { 
-  IsString, 
-  IsEmail, 
-  IsNotEmpty, 
-  MinLength, 
+import {
+  IsString,
+  IsEmail,
+  IsNotEmpty,
+  MinLength,
   MaxLength,
   IsInt,
   IsOptional,
-  Matches
+  Matches,
 } from 'class-validator';
 
-export class CreateIncidenciasDto{
+export class CreateIncidenciasDto {
+  @IsInt()
+  @IsNotEmpty()
+  id_incidencias!: number;
 
-    @IsInt()
-    @IsNotEmpty()
-    id_incidencias !: number;
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(50)
+  @MaxLength(500)
+  descripcion!: string;
 
-
-
-
-    @IsString()
-    @IsNotEmpty()
-    @MinLength(50)
-    @MaxLength(500)
-    descripcion !: string;
-
-    @IsString()
-    @IsNotEmpty()
-    @MinLength(50)
-    @MaxLength(500)
-    estado !: string;
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(50)
+  @MaxLength(500)
+  estado!: string;
 }

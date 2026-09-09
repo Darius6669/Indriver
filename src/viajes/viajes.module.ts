@@ -9,7 +9,15 @@ import { VehiculosEntity } from 'src/entidades/vehiculos.entity';
 import { RutaEntity } from 'src/entidades/ruta.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ViajesEntity,UsuariosEntity,IncidenciasEntity,VehiculosEntity,RutaEntity])],
+  imports: [
+    TypeOrmModule.forFeature([
+      ViajesEntity,
+      UsuariosEntity,
+      IncidenciasEntity,
+      VehiculosEntity,
+      RutaEntity,
+    ]),
+  ],
   controllers: [ViajesController],
   providers: [ViajesService],
 })

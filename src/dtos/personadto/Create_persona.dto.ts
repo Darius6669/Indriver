@@ -1,12 +1,12 @@
-import { 
-  IsString, 
-  IsEmail, 
-  IsNotEmpty, 
-  MinLength, 
+import {
+  IsString,
+  IsEmail,
+  IsNotEmpty,
+  MinLength,
   MaxLength,
   IsInt,
   IsOptional,
-  Matches
+  Matches,
 } from 'class-validator';
 
 export class CreatePersonaDto {

@@ -5,7 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ControlRutaEntity } from 'src/entidades/ControlRuta.entity';
 
 @Module({
-  imports:[TypeOrmModule.forFeature([ControlRutaEntity])],
+  imports: [TypeOrmModule.forFeature([ControlRutaEntity])],
   controllers: [PuntosControlController],
   providers: [PuntosControlService],
 })

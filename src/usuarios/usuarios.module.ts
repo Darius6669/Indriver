@@ -11,11 +11,11 @@ import { CooperativaEntity } from 'src/entidades/cooperativa.entity';
     TypeOrmModule.forFeature([
       UsuariosEntity,
       PersonaEntity,
-      CooperativaEntity
-    ])
+      CooperativaEntity,
+    ]),
   ],
   controllers: [UsuariosController],
   providers: [UsuariosService],
-  exports: [UsuariosService]
+  exports: [UsuariosService],
 })
 export class UsuariosModule {}
