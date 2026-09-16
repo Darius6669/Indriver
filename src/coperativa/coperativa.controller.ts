@@ -7,12 +7,16 @@ import {
   HttpStatus,
   Patch,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { CooperativaService } from './coperativa.service';
-import { CreateCooperativaDto } from 'src/dtos/cooperativadto/Create_cooperativa.dto';
-import { UpdateCooperativaDto } from 'src/dtos/cooperativadto/Updatecooperativa.dto';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard'; // Ajusta la ruta según tu estructura
+import { RolesGuard } from '../Roles/roles.guard';
+import { Roles } from '../Roles/roles.decorador';
 
 @Controller('cooperativa')
+@UseGuards(JwtAuthGuard, RolesGuard) // Aplica autenticación y autorización a todas las rutas
+@Roles(['Admin', 'Superadmin']) 
 export class CoperativaController {
   constructor(private readonly cooperativaService: CooperativaService) {}
 

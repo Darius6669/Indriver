@@ -129,7 +129,8 @@ export class UsuariosService {
             'persona.nombre AS persona_nombre',
             'persona.apellido AS persona_apellido',
             'cooperativa.nombre AS cooperativa_nombre',
-            'cooperativa.rif_cooperativa AS cooperativa_rif'
+            'cooperativa.rif_cooperativa AS cooperativa_rif',
+            'usuario.username AS username'
         ])
         .getRawMany();
   

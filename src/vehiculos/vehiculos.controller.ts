@@ -8,10 +8,15 @@ import {
   Param,
   Patch,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { VehiculosService } from './vehiculos.service';
-
+import { JwtAuthGuard } from '../auth/jwt-auth.guard'; // Ajusta la ruta según tu estructura
+import { RolesGuard } from '../Roles/roles.guard';
+import { Roles } from '../Roles/roles.decorador';
 @Controller('vehiculos')
+@UseGuards(JwtAuthGuard, RolesGuard) // Aplica autenticación y autorización a todas las rutas
+@Roles(['Admin', 'Superadmin','Conductor']) // Especifica los roles permitidos para acceder a estas rutas
 export class VehiculosController {
   constructor(private readonly vehiculosService: VehiculosService) {}
 

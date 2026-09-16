@@ -6,12 +6,16 @@ import {
   HttpStatus,
   Patch,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { RutasService } from './rutas.service';
-import { CreateRutasDto } from 'src/dtos/rutasdto/Create_Rutas.dto';
-import { UpdateRutaDto } from 'src/dtos/rutasdto/Updatedto.dto';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard'; // Ajusta la ruta según tu estructura
+import { RolesGuard } from '../Roles/roles.guard';
+import { Roles } from '../Roles/roles.decorador';
 
 @Controller('rutas')
+@UseGuards(JwtAuthGuard, RolesGuard) // Aplica autenticación y autorización a todas las rutas
+@Roles(['Admin', 'Superadmin']) 
 export class RutasController {
   constructor(private readonly rutasService: RutasService) {}
 

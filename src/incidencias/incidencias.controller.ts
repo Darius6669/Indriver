@@ -8,10 +8,17 @@ import {
   Param,
   Patch,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { IncidenciasService } from './incidencias.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard'; // Ajusta la ruta según tu estructura
+import { RolesGuard } from '../Roles/roles.guard';
+import { Roles } from '../Roles/roles.decorador';
+
 
 @Controller('incidencias')
+@UseGuards(JwtAuthGuard, RolesGuard) // Aplica autenticación y autorización a todas las rutas
+@Roles(['Admin', 'Superadmin','Conductor']) 
 export class IncidenciasController {
   constructor(private readonly incidenciasService: IncidenciasService) {}
 
