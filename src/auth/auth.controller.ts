@@ -19,7 +19,7 @@ export class AuthController {
 
   @Post('/login') // Ruta para iniciar sesión
   @HttpCode(HttpStatus.OK)
-  async Login(@Body() login) {
+  async Login(@Body() login:{username: string password: string})  {
     // Método para iniciar sesión
     const { username, password } = login; // Desestructuración del objeto login para obtener el nombre de usuario y la contraseña
     const token = await this.authService.Login(username, password); // Llama al método Login del servicio de autenticación para obtener el token
