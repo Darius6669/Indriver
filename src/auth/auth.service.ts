@@ -23,7 +23,11 @@ export class AuthService {
         'El usuario está inactivo, contacta a un administrador',
       );
     }
-    const paylod = { username: usuario.username, rol: usuario.rol }; // Crea el payload del token
+    const paylod = {
+      user_id: usuario.user_id, // Necesario por el socket: para colgar el viaje del chofer sin otra query
+      username: usuario.username,
+      rol: usuario.rol,
+    }; // Crea el payload del token
     const token = this.jwtService.sign(paylod); // Genera el token con el payload y lo firma con la semilla del JWT
     return {
       // Retorna el token y el usuario

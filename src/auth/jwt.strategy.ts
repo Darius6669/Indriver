@@ -16,8 +16,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   async validate(payload: any) {
     // Esto es lo que se inyecta como req.user
-    console.log('Payload del token JWT:', payload); // Muestra el payload del token en la consola para depuración
     return {
+      user_id: payload.user_id,
       username: payload.username,
       rol: payload.rol,
     };

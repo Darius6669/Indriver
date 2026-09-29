@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Probador de socket — inDriver</title>
+    <style>
+      body {
+        font-family: ui-monospace, Consolas, monospace;
+        background: #14161a;
+        color: #d7dae0;
+        padding: 20px;
+        font-size: 13px;
+      }
+      h1 { font-size: 16px; color: #7ee787; }
+      .fila { margin: 6px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      label { width: 150px; color: #9aa4b2; }
+      input, select {
+        background: #1f2329; color: #d7dae0; border: 1px solid #30363d;
+        padding: 5px 8px; border-radius: 4px; font: inherit; min-width: 120px;
+      }
+      button {
+        background: #238636; color: #fff; border: 0; padding: 6px 12px;
+        border-radius: 4px; cursor: pointer; font: inherit;
+      }
+      button:hover { background: #2ea043; }
+      button.abajo { background: #6e2c28; }
+      button.abajo:hover { background: #8b3a35; }
+      #log {
+        background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+        padding: 12px; height: 55vh; overflow-y: auto; margin-top: 16px;
+        white-space: pre-wrap;
+      }
+      .info  { color: #58a6ff; }
+      .ok    { color: #7ee787; }
+      .mal   { color: #ff7b72; }
+      .aviso { color: #d29922; }
+      hr { border: 0; border-top: 1px solid #30363d; margin: 14px 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Probador de socket — inDriver</h1>
+    <p class="info">
+      Abrí este archivo con doble click. Con el server corriendo en el puerto 3000.
+    </p>
+
+    <hr />
+    <div class="fila">
+      <label>Servidor</label>
+      <input id="url" value="http://localhost:3000" size="26" />
+    </div>
+    <div class="fila">
+      <label>Usuario</label>
+      <input id="user" value="conductor_test" />
+      <label>Password</label>
+      <input id="pass" value="clave123" />
+      <button onclick="login()">1) Login</button>
+    </div>
+    <div class="fila">
+      <label>Token</label>
+      <input id="token" placeholder="se llena solo con el login" size="40" />
+      <button onclick="conectar()">2) Conectar</button>
+    </div>
+
+    <hr />
+    <div class="fila">
+      <label>Acción</label>
+      <button onclick="start()">viaje:start</button>
+      <button onclick="gps()">viaje:ubicacion</button>
+      <button onclick="reconectar()">viaje:reconectar</button>
+      <button onclick="finalizar()">viaje:finalizar</button>
+      <button class="abajo" onclick="salir()">desconectar</button>
+    </div>
+    <div class="fila">
+      <label>Ruta</label><input id="ruta" value="RUTA-001" size="12" />
+      <label>Placa</label><input id="placa" value="TEST-01" size="12" />
+      <label>Lat</label><input id="lat" value="10.4806" size="10" />
+      <label>Lng</label><input id="lng" value="-66.9036" size="11" />
+    </div>
+    <div class="fila">
+      <label>Suscribirse</label>
+      <button onclick="suscribir()">suscribir:ruta</button>
+      <button onclick="activos()">viajes:activos</button>
+      <button onclick="ping()">ping</button>
+    </div>
+
+    <div id="log"></div>
+
+    <script src="./node_modules/socket.io-client/dist/socket.io.min.js"></script>
+    <script>
+      let s = null;
+      let idViaje = null;
+
+      function pintar(txt, clase = 'info') {
+        const l = document.getElementById('log');
+        l.innerHTML += `<span class="${clase}">${txt}</span>\n`;
+        l.scrollTop = l.scrollHeight;
+      }
+
+      async function login() {
+        try {
+          const r = await fetch(`${url.value}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: document.getElementById('user').value,
+              password: document.getElementById('pass').value,
+            }),
+          });
+          const j = await r.json();
+          if (!j.control?.token) throw new Error(JSON.stringify(j.message));
+          document.getElementById('token').value = j.control.token;
+          pintar('login OK -> token listo', 'ok');
+        } catch (e) {
+          pintar('login fallo: ' + e.message, 'mal');
+        }
+      }
+
+      function conectar() {
+        const token = document.getElementById('token').value;
+        if (!token) return pintar('primero hacé el login', 'mal');
+
+        s = io(url.value, { transports: ['websocket'], auth: { token } });
+
+        // onAny deja ver TODO lo que llega, que es lo que se busca al probar.
+        s.onAny((ev, datos) => pintar(`< ${ev}  ${JSON.stringify(datos)}`));
+
+        s.on('conexion:lista', () => pintar('conectado y autenticado', 'ok'));
+        s.on('connect', () => pintar('socket conectado (aun sin validar)', 'aviso'));
+        s.on('error:no_autorizado', (e) => pintar('NO AUTORIZADO: ' + e.message, 'mal'));
+        s.on('disconnect', (r) => pintar('desconectado: ' + r, 'aviso'));
+      }
+
+      const p = (lat, lng, vel = 30) => ({
+        id_ruta: ruta.value,
+        id_vehiculo: placa.value,
+        lat: Number(lat),
+        lng: Number(lng),
+        velocidad: vel,
+        rumbo: 90,
+        precision: 8,
+      });
+
+      function start() {
+        s.emit('viaje:start', p(lat.value, lng.value), (ack) => {
+          pintar('ack viaje:start ' + JSON.stringify(ack), ack.ok ? 'ok' : 'mal');
+          if (ack.ok) idViaje = ack.id_viaje;
+        });
+      }
+
+      function gps() {
+        s.emit('viaje:ubicacion', p(lat.value, lng.value), (ack) => {
+          pintar(
+            'ack ubicacion ' + JSON.stringify(ack),
+            ack.ok ? (ack.aceptado ? 'ok' : 'aviso') : 'mal',
+          );
+        });
+      }
+
+      function reconectar() {
+        if (!idViaje) return pintar('no hay viaje abierto', 'mal');
+        s.emit('viaje:reconectar', { id_viaje: idViaje }, (ack) =>
+          pintar('ack reconectar ' + JSON.stringify(ack), ack.ok ? 'ok' : 'mal'),
+        );
+      }
+
+      function finalizar() {
+        if (!idViaje) return pintar('no hay viaje abierto', 'mal');
+        s.emit('viaje:finalizar', { id_viaje: idViaje }, (ack) => {
+          pintar('ack finalizar ' + JSON.stringify(ack), ack.ok ? 'ok' : 'mal');
+          idViaje = null;
+        });
+      }
+
+      function salir() {
+        s?.close();
+        pintar('socket cerrado', 'aviso');
+      }
+
+      function suscribir() {
+        // Ojo: acá el campo es numero_ruta, no id_ruta como en viaje:start.
+        // Son dos DTOs distintos.
+        s.emit('suscribir:ruta', { numero_ruta: ruta.value }, (ack) =>
+          pintar('ack suscribir ' + JSON.stringify(ack)),
+        );
+      }
+
+      function activos() {
+        // No lleva payload.
+        s.emit('viajes:activos', {}, (ack) => pintar('ack activos ' + JSON.stringify(ack)));
+      }
+
+      function ping() {
+        s.emit('ping', { ts: Date.now() }, (ack) => pintar('ack ping ' + JSON.stringify(ack)));
+      }
+    </script>
+  </body>
+</html>

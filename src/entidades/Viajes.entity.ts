@@ -7,11 +7,12 @@ import {
   PrimaryColumn,
   PrimaryGeneratedColumn,
 } from 'typeorm';
-import { IsEmail, IsNotEmpty, Min, Max } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, Min, Max } from 'class-validator';
 import { VehiculosEntity } from './vehiculos.entity';
 import { RutaEntity } from './ruta.entity';
 import { IncidenciasEntity } from './Incidencias.entity';
 import { UsuariosEntity } from './Usuarios.entity';
+import { ViajeUbicacionEntity } from './ViajeUbicacion.entity';
 
 @Entity('viaje')
 export class ViajesEntity {
@@ -22,9 +23,14 @@ export class ViajesEntity {
   @IsNotEmpty()
   fecha_inicio!: Date;
 
-  @Column({ type: 'timestamp' })
-  @IsNotEmpty()
-  fecha_final!: Date;
+  /**
+   * NULL mientras el viaje sigue en curso. Es la forma de consultar los viajes
+   * activos: `WHERE fecha_final IS NULL`. Requiere el ALTER TABLE del script
+   * sql/001_crear_viaje_ubicacion.sql.
+   */
+  @Column({ type: 'timestamp', nullable: true })
+  @IsOptional()
+  fecha_final!: Date | null;
 
   @Column({ type: 'double precision' })
   @IsNotEmpty()
@@ -51,4 +57,11 @@ export class ViajesEntity {
   @ManyToOne(() => RutaEntity, (ruta) => ruta.viajes)
   @JoinColumn({ name: 'ruta_id' })
   ruta!: RutaEntity;
+
+  /**
+   * Historial completo del recorrido. La ultima posicion conocida vive en
+   * lactitud/longitud de esta misma fila; aqui queda la traza.
+   */
+  @OneToMany(() => ViajeUbicacionEntity, (ubicacion) => ubicacion.viaje)
+  ubicaciones!: ViajeUbicacionEntity[];
 }

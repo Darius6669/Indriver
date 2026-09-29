@@ -8,6 +8,43 @@ import { UsuariosEntity } from 'src/entidades/Usuarios.entity';
 import { VehiculosEntity } from 'src/entidades/vehiculos.entity';
 import { CreateViajesDto } from 'src/dtos/viajes/Create_Viajes.dto';
 import { UpdateViajesDto } from 'src/dtos/viajes/UpdateViajes.dto';
+import { ViajeUbicacionEntity } from 'src/entidades/ViajeUbicacion.entity';
+import { WebsocketService } from 'src/websocket/websocket.service';
+
+/** Vista plana de un viaje en curso: lo minimo que necesita el mapa. */
+export interface ViajeActivoDTO {
+  id_viaje: number;
+  fecha_inicio: Date;
+  lactitud: number;
+  longitud: number;
+  usuario: { user_id: number; username: string } | null;
+  vehiculo: { placa: string } | null;
+  ruta: { numero_ruta: string; nombre: string } | null;
+}
+
+/** Un bus que cae dentro del radio pedido, ya ordenado por cercanía. */
+export interface BusCercanoDTO {
+  id_viaje: number;
+  lat: number;
+  lng: number;
+  distancia_m: number;
+  /** true = hay socket conectado y la posicion viene del GPS al instante. */
+  online: boolean;
+  /** true = las coordenadas vienen de memoria, no de la fila del viaje. */
+  posicion_en_vivo: boolean;
+  velocidad: number | null;
+  rumbo: number | null;
+  /** Cuando se recibio ese punto por ultima vez. */
+  ts_actualizacion: number;
+  placa: string | null;
+  numero_ruta: string | null;
+  nombre_ruta: string | null;
+  username: string | null;
+}
+
+/** Radio medio terrestre en metros. */
+const R_TIERRA_M = 6_371_000;
+
 @Injectable()
 export class ViajesService {
   constructor(
@@ -21,6 +58,11 @@ export class ViajesService {
     private vehiculosRepository: Repository<VehiculosEntity>,
     @InjectRepository(IncidenciasEntity)
     private IncidenciasRepository: Repository<IncidenciasEntity>,
+    @InjectRepository(ViajeUbicacionEntity)
+    private ubicacionesRepository: Repository<ViajeUbicacionEntity>,
+    // Solo para enriquecer con la posicion al instante y el flag `online`.
+    // Vive en memoria; la BD se refresca cada 30s.
+    private readonly trackingService: WebsocketService,
   ) {}
 
   async ValidarRuta(numero_ruta: string): Promise<boolean> {
@@ -178,5 +220,231 @@ export class ViajesService {
       return await this.ObtenerVijesId(update.id_viaje);
     }
     throw new NotFoundException(`El viaje con id ${id_viaje} no encontrado.`);
+  }
+
+  // ==================================================================
+  //  TRACKING
+  // ==================================================================
+
+  /**
+   * Viajes sin fecha_final. Se apoya en el indice parcial
+   * idx_viaje_activos del script sql/001.
+   */
+  async ObtenerViajesActivos(): Promise<ViajeActivoDTO[]> {
+    const viajes = await this.viajesRepository
+      .createQueryBuilder('viaje')
+      .leftJoinAndSelect('viaje.usuario', 'usuario')
+      .leftJoinAndSelect('viaje.vehiculo', 'vehiculo')
+      .leftJoinAndSelect('viaje.ruta', 'ruta')
+      .where('viaje.fecha_final IS NULL')
+      .orderBy('viaje.fecha_inicio', 'DESC')
+      .getMany();
+
+    return viajes.map((v) => ({
+      id_viaje: v.id_viaje,
+      fecha_inicio: v.fecha_inicio,
+      lactitud: v.lactitud,
+      longitud: v.longitud,
+      usuario: v.usuario
+        ? { user_id: v.usuario.user_id, username: v.usuario.username }
+        : null,
+      vehiculo: v.vehiculo ? { placa: v.vehiculo.placa } : null,
+      ruta: v.ruta
+        ? { numero_ruta: v.ruta.numero_ruta, nombre: v.ruta.nombre }
+        : null,
+    }));
+  }
+
+  /**
+   * Ultima posicion conocida. Sale de la fila del viaje (refrescada cada 30s
+   * por el socket), no del historial: es la consulta barata.
+   */
+  async ObtenerUltimaUbicacion(id_viaje: number) {
+    const viaje = await this.viajesRepository.findOne({
+      where: { id_viaje },
+    });
+    if (!viaje) {
+      throw new NotFoundException(`El viaje con id ${id_viaje} no existe.`);
+    }
+    return {
+      id_viaje: viaje.id_viaje,
+      lat: viaje.lactitud,
+      lng: viaje.longitud,
+      en_curso: viaje.fecha_final === null,
+      fecha_inicio: viaje.fecha_inicio,
+      fecha_final: viaje.fecha_final,
+    };
+  }
+
+  /**
+   * Traza del recorrido para dibujar la polilinea. Sale de viaje_ubicacion,
+   * no de la fila del viaje.
+   */
+  async ObtenerRecorrido(id_viaje: number, horas = 6) {
+    const existe = await this.viajesRepository.findOne({
+      where: { id_viaje },
+    });
+    if (!existe) {
+      throw new NotFoundException(`El viaje con id ${id_viaje} no existe.`);
+    }
+
+    const desde = new Date(Date.now() - horas * 60 * 60 * 1000);
+    const puntos = await this.ubicacionesRepository
+      .createQueryBuilder('u')
+      .where('u.id_viaje = :id_viaje', { id_viaje })
+      .andWhere('u.recorded_at >= :desde', { desde })
+      .orderBy('u.recorded_at', 'ASC')
+      .getMany();
+
+    return {
+      id_viaje,
+      horas,
+      total: puntos.length,
+      recorrido: puntos.map((p) => ({
+        lat: p.lactitud,
+        lng: p.longitud,
+        velocidad: p.velocidad,
+        rumbo: p.rumbo,
+        ts: p.recorded_at,
+      })),
+    };
+  }
+
+  /**
+   * Fallback por REST cuando el socket esta caido (movil sin datos, bateria
+   * plana). El socket sigue siendo la via principal.
+   */
+  async RegistrarUbicacionManual(
+    id_viaje: number,
+    lactitud: number,
+    longitud: number,
+  ) {
+    await this.viajesRepository.update({ id_viaje }, { lactitud, longitud });
+    await this.ubicacionesRepository.insert({
+      id_viaje,
+      lactitud,
+      longitud,
+      recorded_at: new Date(),
+    });
+    return await this.ObtenerUltimaUbicacion(id_viaje);
+  }
+
+  // ==================================================================
+  //  BUSES CERCANOS
+  // ==================================================================
+
+  /**
+   * "Buses cerca de mi": viajes en curso dentro de un radio, de mas cerca a mas
+   * lejos.
+   *
+   * Son dos fuentes de verdad y hay que mezclarlas bien:
+   *
+   *  1. La BD (WHERE fecha_final IS NULL) es la fuente que sobrevive a un
+   *     reinicio, asi que es la base. Pero su posicion esta hasta 30s atrasada.
+   *  2. La memoria del socket tiene la posicion al instante y el estado
+   *     real de conexion, pero solo conoce los viajes de ESTE proceso.
+   *
+   * Por eso: la BD acota el terreno, y despues cada fila se corrige con la
+   * posicion en vivo si la hay, y se vuelve a medir y a ordenar.
+   */
+  async ObtenerViajesCercanos(
+    lactitud: number,
+    longitud: number,
+    radioM = 1000,
+    limite = 20,
+    soloOnline = false,
+  ): Promise<BusCercanoDTO[]> {
+    const radio = Math.min(50_000, Math.max(50, radioM));
+    const max = Math.min(100, Math.max(1, limite));
+
+    // Caja envolvente: antes de calcular haversine se descartan los puntos que
+    // ni por musica pueden estar. Sin esto Postgres recorre TODOS los viajes
+    // activos por cada consulta. Es un filtro rectangular, no exacto; la
+    // precision la pone el haversine de abajo.
+    const dLat = radio / 111_320;
+    const cos = Math.cos((lactitud * Math.PI) / 180);
+    // En los polos el coseno tiende a 0 y la division explota: se topa en 1 grado.
+    const dLng = radio / (111_320 * Math.max(Math.abs(cos), 0.0175));
+
+    // Se piden mas filas de las que se van a devolver porque el ajuste con la
+    // posicion en vivo puede sacar a alguien del radio, y ese hueco no se
+    // rellena con una segunda vuelta a la BD.
+    const candidatos = await this.viajesRepository
+      .createQueryBuilder('viaje')
+      .leftJoinAndSelect('viaje.usuario', 'usuario')
+      .leftJoinAndSelect('viaje.vehiculo', 'vehiculo')
+      .leftJoinAndSelect('viaje.ruta', 'ruta')
+      .select([
+        'viaje.id_viaje',
+        'viaje.lactitud',
+        'viaje.longitud',
+        'usuario.username',
+        'vehiculo.placa',
+        'ruta.numero_ruta',
+        'ruta.nombre',
+      ])
+      .where('viaje.fecha_final IS NULL')
+      .andWhere('viaje.lactitud BETWEEN :latMin AND :latMax', {
+        latMin: lactitud - dLat,
+        latMax: lactitud + dLat,
+      })
+      .andWhere('viaje.longitud BETWEEN :lngMin AND :lngMax', {
+        lngMin: longitud - dLng,
+        lngMax: longitud + dLng,
+      })
+      .limit(max * 3)
+      .getMany();
+
+    const vivos = this.trackingService.posicionesVivas();
+
+    const cerca: BusCercanoDTO[] = [];
+    for (const v of candidatos) {
+      const vivo = vivos.get(v.id_viaje);
+      // Si hay sesion en memoria, manda su posicion: la de la fila tiene hasta
+      // 30s de retraso y para "cercano" eso ya es otra calle.
+      const lat = vivo?.ultima_ubicacion.lat ?? v.lactitud;
+      const lng = vivo?.ultima_ubicacion.lng ?? v.longitud;
+      const enVivo = vivo !== undefined;
+
+      if (soloOnline && !vivo?.online) continue;
+
+      const distancia = this.distanciaMetros(lactitud, longitud, lat, lng);
+      if (distancia > radio) continue;
+
+      cerca.push({
+        id_viaje: v.id_viaje,
+        lat,
+        lng,
+        distancia_m: Math.round(distancia),
+        online: vivo?.online ?? false,
+        posicion_en_vivo: enVivo,
+        velocidad: vivo?.ultima_ubicacion.velocidad ?? null,
+        rumbo: vivo?.ultima_ubicacion.rumbo ?? null,
+        ts_actualizacion: vivo?.ultima_ubicacion.ts ?? 0,
+        placa: vivo?.placa ?? v.vehiculo?.placa ?? null,
+        numero_ruta: vivo?.numero_ruta ?? v.ruta?.numero_ruta ?? null,
+        nombre_ruta: v.ruta?.nombre ?? null,
+        username: vivo?.username ?? v.usuario?.username ?? null,
+      });
+    }
+
+    cerca.sort((a, b) => a.distancia_m - b.distancia_m);
+    return cerca.slice(0, max);
+  }
+
+  /** Distancia en metros entre dos puntos. Haversine, no Euclidea. */
+  private distanciaMetros(
+    lat1: number,
+    lng1: number,
+    lat2: number,
+    lng2: number,
+  ): number {
+    const rad = (d: number) => (d * Math.PI) / 180;
+    const dLat = rad(lat2 - lat1);
+    const dLng = rad(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return 2 * R_TIERRA_M * Math.asin(Math.min(1, Math.sqrt(a)));
   }
 }

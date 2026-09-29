@@ -15,10 +15,13 @@ import { jwtConstants } from './constans';
     JwtModule.register({
       // Configura el módulo de JWT
       secret: jwtConstants.secret, // variable de entorno para la semilla del JWT
-      signOptions: { expiresIn: '1h' }, // Tiempo de vida del token mas adelante le pondre 24 horas
+      signOptions: { expiresIn: jwtConstants.expiresIn as any }, // 24h por defecto: el telefono debe aguantar un turno completo
     }),
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],
+  // Se exporta JwtModule para que WebsocketModule pueda verificar el token
+  // en el handshake del socket sin duplicar la configuracion del secreto.
+  exports: [JwtModule],
 })
 export class AuthModule {}

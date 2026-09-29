@@ -1,0 +1,6 @@
+Cómo lo pruebas tú
+npm run start:dev
+$env:OBS_USER="obs_test"; $env:OBS_PASS="clave123"
+node test-conductor-ws.js conductor_test clave123 RUTA-001 TEST-01 RUTA-001 TEST-02
+1 solo bus: node test-conductor-ws.js conductor_test clave123 RUTA-001 TEST-01
+Vas a ver: 2 conductores, el observador recibiendo el batch, una caída de red al 40 % con reenganche, y el cierre con fecha_final.

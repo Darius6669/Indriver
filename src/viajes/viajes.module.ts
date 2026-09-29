@@ -7,18 +7,26 @@ import { UsuariosEntity } from 'src/entidades/Usuarios.entity';
 import { IncidenciasEntity } from 'src/entidades/Incidencias.entity';
 import { VehiculosEntity } from 'src/entidades/vehiculos.entity';
 import { RutaEntity } from 'src/entidades/ruta.entity';
+import { ViajeUbicacionEntity } from 'src/entidades/ViajeUbicacion.entity';
+import { WebsocketModule } from 'src/websocket/websocket.module';
 
 @Module({
   imports: [
+    // Para inyectar WebsocketService y enricher "buses cercanos" con la
+    // posicion en vivo. Solo en este sentido: WebsocketModule NO importa
+    // ViajesModule, asi que no hay ciclo.
+    WebsocketModule,
     TypeOrmModule.forFeature([
       ViajesEntity,
       UsuariosEntity,
       IncidenciasEntity,
       VehiculosEntity,
       RutaEntity,
+      ViajeUbicacionEntity,
     ]),
   ],
   controllers: [ViajesController],
   providers: [ViajesService],
+  exports: [ViajesService],
 })
 export class ViajesModule {}
