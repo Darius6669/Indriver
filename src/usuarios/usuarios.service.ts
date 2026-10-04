@@ -128,6 +128,7 @@ export class UsuariosService {
         .select([
             'persona.nombre AS persona_nombre',
             'persona.apellido AS persona_apellido',
+            'persona.cedula AS persona_cedula',
             'cooperativa.nombre AS cooperativa_nombre',
             'cooperativa.rif_cooperativa AS cooperativa_rif',
             'usuario.username AS username'
