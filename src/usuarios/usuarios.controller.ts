@@ -10,14 +10,25 @@ import {
   Post,
 } from '@nestjs/common';
 import { UsuariosService } from './usuarios.service';
+import { CreateUsuarioDTO } from 'src/dtos/usuarios/Create_usuario.dto';
+import { UpdateUsuarioDTO } from 'src/dtos/usuarios/Update_usuario.dto';
 
+/**
+ * Controlador HTTP del recurso "usuarios". Expone las rutas CRUD bajo /usuarios
+ * y delega toda la lógica de negocio en UsuariosService.
+ */
 @Controller('usuarios')
 export class UsuariosController {
+  // Inyección del servicio de usuarios; la comunicación se hace solo a través de él.
   constructor(private readonly usuariosService: UsuariosService) {}
 
+  /**
+   * Crea un usuario nuevo a partir del DTO recibido en el cuerpo.
+   * Responde 201 Created con el usuario creado.
+   */
   @Post('/Crear-usuario')
   @HttpCode(HttpStatus.CREATED)
-  async CrearUsuario(@Body() CreateUsuario) {
+  async CrearUsuario(@Body() CreateUsuario: CreateUsuarioDTO) {
     const usuario = await this.usuariosService.CreateUsuario(CreateUsuario);
     return {
       message: 'Se ha Creado Exitosamente el Usuario*',
@@ -25,6 +36,7 @@ export class UsuariosController {
     };
   }
 
+  /** Devuelve la lista completa de usuarios registrados (200 OK). */
   @Get('/Obtener-usuario')
   @HttpCode(HttpStatus.OK)
   async Obtener_Usuarios() {
@@ -35,6 +47,7 @@ export class UsuariosController {
     };
   }
 
+  /** Busca y devuelve un usuario por su username tomado de la ruta. */
   @Get('/Obtener-usuario-username/:username')
   @HttpCode(HttpStatus.OK)
   async Obtener_Usuario_Username(@Param('username') username: string) {
@@ -45,16 +58,19 @@ export class UsuariosController {
     };
   }
 
+  /** Devuelve los usuarios cuyo nombre de cooperativa coincide parcialmente. */
   @Get('/Obtener-usuarios-cooperativa/:cooperativa')
   @HttpCode(HttpStatus.OK)
   async Obtener_Usuario_Cooperativa(@Param('cooperativa') cooperativa: string) {
-    const usuario = await this.usuariosService.ObtenerUsuariosCooperativa(cooperativa);
+    const usuario =
+      await this.usuariosService.ObtenerUsuariosCooperativa(cooperativa);
     return {
       message: 'Se ha cargado Exitosamente el Usuario*',
       control: usuario,
     };
   }
 
+  /** Elimina el usuario indicado por username en la ruta. */
   @Delete('/Eliminar-usuario/:username')
   @HttpCode(HttpStatus.OK)
   async Eliminar_Usuario(@Param('username') username: string) {
@@ -65,11 +81,15 @@ export class UsuariosController {
     };
   }
 
+  /**
+   * Actualiza parcialmente un usuario: el username identifica el recurso en la
+   * ruta y el cuerpo trae los campos a modificar.
+   */
   @Patch('/Actualizar-usuario/:username')
   @HttpCode(HttpStatus.OK)
   async Actualizar_Usuario(
     @Param('username') username: string,
-    @Body() updateusuarioDTO,
+    @Body() updateusuarioDTO: UpdateUsuarioDTO,
   ) {
     const usuario = await this.usuariosService.actualizarUsuario(
       username,

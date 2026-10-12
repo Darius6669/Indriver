@@ -5,13 +5,22 @@ import { UpdateCooperativaDto } from 'src/dtos/cooperativadto/Updatecooperativa.
 import { CooperativaEntity } from 'src/entidades/cooperativa.entity';
 import { Repository } from 'typeorm';
 
+/**
+ * Servicio de cooperativas. Gestiona el CRUD de la entidad Cooperativa.
+ * Esta entidad es referenciada por Usuario (N:1) y por Vehículo (N:1).
+ */
 @Injectable()
 export class CooperativaService {
+  // Repositorio TypeORM de la entidad Cooperativa.
   constructor(
     @InjectRepository(CooperativaEntity)
     private cooperativaRepository: Repository<CooperativaEntity>,
   ) {}
 
+  /**
+   * Crea una cooperativa. Antes de insertar verifica que el RIF no esté ya
+   * registrado; en ese caso lanza NotFoundException.
+   */
   async CrearCooperativa(
     CreateCooperativadto: CreateCooperativaDto,
   ): Promise<CooperativaEntity> {
@@ -33,10 +42,14 @@ export class CooperativaService {
     return this.cooperativaRepository.save(cooperativa);
   }
 
+  /** Devuelve todas las cooperativas registradas. */
   async ObtenerCooperativas(): Promise<CooperativaEntity[]> {
     return this.cooperativaRepository.find();
   }
 
+  /**
+   * Busca una cooperativa por su RIF. Lanza NotFoundException si no existe.
+   */
   async ObtenercooperativaPorRif(
     Rif_cooperativa: string,
   ): Promise<CooperativaEntity> {
@@ -51,6 +64,9 @@ export class CooperativaService {
     return cooperativa;
   }
 
+  /**
+   * Elimina una cooperativa por RIF. Lanza NotFoundException si no existe.
+   */
   async EliminarCooperativa(
     rif_cooperativa: string,
   ): Promise<CooperativaEntity> {
@@ -65,11 +81,16 @@ export class CooperativaService {
     return await this.cooperativaRepository.remove(cooperativa);
   }
 
+  /**
+   * Actualiza parcialmente los campos de la cooperativa. Solo sobrescribe los
+   * que vienen en el DTO; el resto se conservan (??).
+   */
   async ActualizarCooperativa(
     rif_cooperativa: string,
     UpdateCooperativadto: UpdateCooperativaDto,
   ): Promise<CooperativaEntity> {
     const cooperativa = await this.cooperativaRepository.findOne({
+      // En este código se busca por el RIF que llega en el DTO, no por el parámetro recibido.
       where: { rif_cooperativa: UpdateCooperativadto.rif_cooperativa },
     });
     if (!cooperativa) {

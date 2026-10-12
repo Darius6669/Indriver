@@ -14,12 +14,19 @@ import { IncidenciasModule } from './incidencias/incidencias.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
 import { AuthModule } from './auth/auth.module';
 import { RolesModule } from './Roles/roles.module';
+/**
+ * Módulo raíz de la aplicación.
+ * Carga las variables de entorno, establece la conexión a PostgreSQL con
+ * TypeORM y agrega todos los módulos funcionales del sistema.
+ */
 @Module({
   imports: [
+    // Carga el archivo .env y expone ConfigService de forma global.
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
     }),
+    // Conexión única a PostgreSQL; las credenciales vienen del .env.
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.HOST_BD,
@@ -27,7 +34,9 @@ import { RolesModule } from './Roles/roles.module';
       username: process.env.USER_NAME,
       password: process.env.PASSWORD_BD,
       database: process.env.DB_NAME,
+      // Escanea y registra todas las entidades del proyecto.
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
+      // false: el esquema se gestiona con migraciones, no automáticamente.
       synchronize: false,
     }),
     WebsocketModule,
@@ -40,7 +49,7 @@ import { RolesModule } from './Roles/roles.module';
     IncidenciasModule,
     UsuariosModule,
     AuthModule,
-    RolesModule
+    RolesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

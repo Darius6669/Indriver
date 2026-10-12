@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   Logger,
   NotFoundException,
   UnauthorizedException,
@@ -35,11 +36,13 @@ import {
   ViajeSession,
 } from './websocket.types';
 
+/** Respuesta del cliente por evento: `ack(payload)`. */
 type Ack = (response: unknown) => void;
 
 /** Cualquiera autenticado puede ver; solo el Conductor puede mover un bus. */
 const ROL_QUE_PUBLICA = 'Conductor';
 
+/** Identidad verificada del socket: toda la politca de acceso sale de aqui. */
 interface ConductorConectado {
   userId: number;
   username: string;
@@ -52,6 +55,17 @@ interface Limite {
   ultimoRefill: number;
 }
 
+/**
+ * Gateway de WebSocket: el tracking en tiempo real de los buses.
+ *
+ * Roles de cada lado:
+ * - el TELEFONO publica (viaje:start, viaje:ubicacion, viaje:finalizar);
+ * - el SERVIDOR solo retransmite a las rooms (viaje/ruta/cooperativa).
+ *
+ * Todo el control de acceso vive aqui: se valida el JWT en el handshake, se
+ * exige rol 'Conductor' en cada evento de escritura y se limita el rate de
+ * eventos por socket. La logica de negocio esta en WebsocketService.
+ */
 @WebSocketGateway({
   cors: { origin: '*', methods: ['GET', 'POST'], credentials: true },
   transports: ['websocket', 'polling'],
@@ -59,8 +73,10 @@ interface Limite {
 export class WebsocketGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
+  /** Referencia al server de socket.io (la setea NestJS al arrancar). */
   @WebSocketServer() server: Server;
 
+  /** Logger con nombre propio para rastrear los eventos en consola. */
   private readonly logger = new Logger('WebsocketGateway');
 
   /** socketId -> identidad verificada. Base de todo el control de acceso. */
@@ -69,12 +85,16 @@ export class WebsocketGateway
   /** socketId -> cubo de tokens del rate limit. */
   private readonly limites = new Map<string, Limite>();
   constructor(
+    /** Servicio de tracking en memoria (sesiones, broadcast, persistencia). */
     private readonly trackingService: WebsocketService,
+    /** Verificador de JWT (mismo secreto que /auth/login). */
     private readonly jwtService: JwtService,
+    /** Repositorio de usuarios: confirma que la cuenta siga activa. */
     @InjectRepository(UsuariosEntity)
     private readonly usuariosRepository: Repository<UsuariosEntity>,
   ) {}
 
+  /** Al arrancar el gateway se conecta al server y se encienden los timers. */
   afterInit(server: Server) {
     this.server = server;
     this.trackingService.setServer(server);
@@ -87,6 +107,10 @@ export class WebsocketGateway
   //  CONEXION / AUTENTICACION
   // ==================================================================
 
+  /**
+   * Ciclo de vida de conexion: verifica el JWT, registra al cliente y lo mete
+   * en su room privada de conductor.
+   */
   async handleConnection(client: Socket) {
     // Los handlers se registran ANTES de verificar. La verificacion contra la
     // BD es async, y el cliente puede emitir en cuanto termina el handshake: si
@@ -114,6 +138,7 @@ export class WebsocketGateway
     });
   }
 
+  /** Al desconectar se limpia el estado del socket y se marca offline. */
   handleDisconnect(client: Socket) {
     const identidad = this.conductores.get(client.id);
     this.conductores.delete(client.id);
@@ -132,6 +157,10 @@ export class WebsocketGateway
     }
   }
 
+  /**
+   * Valida el JWT del handshake y confirma en BD que el usuario siga existiendo
+   * y activo. Devuelve la identidad o null (y cierra el socket) si falla.
+   */
   private async autenticar(client: Socket): Promise<ConductorConectado | null> {
     const token =
       (client.handshake.auth?.token as string | undefined) ??
@@ -191,6 +220,7 @@ export class WebsocketGateway
     };
   }
 
+  /** Emite el error, espera a que se envie y cierra la conexion. */
   private rechazar(client: Socket, code: string, mensaje: string) {
     this.logger.warn(`Conexion rechazada [${code}] desde ${client.id}`);
     client.emit('error:no_autorizado', { code, message: mensaje });
@@ -202,6 +232,12 @@ export class WebsocketGateway
   //  EVENTOS
   // ==================================================================
 
+  /**
+   * Registra todos los handlers del socket. Cada handler arranca con
+   * `esperarIdentidad` para no perder eventos que llegan antes de terminar la
+   * verificacion, y los de escritura cortan con `exigirConductor` a los roles
+   * que solo pueden mirar.
+   */
   private registrarHandlers(
     client: Socket,
     identidadP: Promise<ConductorConectado | null>,
@@ -382,6 +418,8 @@ export class WebsocketGateway
       }
     };
 
+    // Pausa y finalizacion comparten todo el flujo, solo cambian en el DTO y
+    // en la semantica: pausa deja el viaje abierto en BD igual.
     client.on('viaje:pausa', cerrar);
     client.on('viaje:finalizar', cerrar);
 
@@ -419,8 +457,11 @@ export class WebsocketGateway
 
     // ---- Heartbeat: prueba que la conexion sigue viva y mide la latencia ----
     client.on('ping', (raw: unknown, ack?: Ack) => {
-      const sesion = this.trackingService.getSesionDelSocket(client.id);
-      if (sesion) this.trackingService.touch(sesion.id_viaje);
+      for (const sesion of this.trackingService.getSesionesDelSocket(
+        client.id,
+      )) {
+        this.trackingService.touch(sesion.id_viaje);
+      }
       ack?.({
         ok: true,
         server_time: Date.now(),
@@ -469,6 +510,11 @@ export class WebsocketGateway
     }
   }
 
+  /**
+   * Resuelve a que sesion apunta el evento: la del socket cuando no hay id, o
+   * la del id SI esa sesion pertenece a este mismo socket (evita que un socket
+   * maneje viajes ajenos).
+   */
   private resolverSesion(
     client: Socket,
     idViaje?: number,
@@ -481,6 +527,11 @@ export class WebsocketGateway
     return sesion && sesion.socketId === client.id ? sesion : undefined;
   }
 
+  /**
+   * Valida el payload crudo del evento contra un DTO de class-validator.
+   * Rechaza campos extra (forbidNonWhitelisted) y devuelve null con el error
+   * emitido al cliente si algo no cuadra.
+   */
   private validar<T extends object>(
     clase: new () => T,
     raw: unknown,
@@ -507,6 +558,10 @@ export class WebsocketGateway
     return instancia;
   }
 
+  /**
+   * Traduce errores de negocio a un evento y un ack con codigo. Lo que no es
+   * una excepcion conocida se loguea como interno y se avisa generico.
+   */
   private responderError(client: Socket, ack: Ack | undefined, error: unknown) {
     if (error instanceof NotFoundException) {
       client.emit('error:no_encontrado', { message: error.message });
@@ -521,6 +576,14 @@ export class WebsocketGateway
       return ack?.({
         ok: false,
         code: 'no_autorizado',
+        message: error.message,
+      });
+    }
+    if (error instanceof ConflictException) {
+      client.emit('error:conflicto', { message: error.message });
+      return ack?.({
+        ok: false,
+        code: 'conflicto',
         message: error.message,
       });
     }

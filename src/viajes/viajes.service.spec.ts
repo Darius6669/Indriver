@@ -9,9 +9,18 @@ import { VehiculosEntity } from 'src/entidades/vehiculos.entity';
 import { RutaEntity } from 'src/entidades/ruta.entity';
 import { WebsocketService } from 'src/websocket/websocket.service';
 
+/**
+ * Pruebas unitarias de ViajesService.
+ *
+ * Mocks de repositorios: se montan los 7 providers que el service inyecta
+ * (viajes, ubicaciones, ruta, usuario, vehiculo, incidencia y el
+ * WebsocketService de tracking). Cada grupo de `describe` cubre un metodo del
+ * service y verifica su comportamiento contra esos mocks.
+ */
 describe('ViajesService', () => {
   let service: ViajesService;
 
+  /** Mock del repositorio de viajes: cadena de QB encadenable. */
   const viajesRepo = {
     find: jest.fn(),
     findOne: jest.fn(),
@@ -30,11 +39,15 @@ describe('ViajesService', () => {
       getMany: jest.fn().mockResolvedValue([]),
     })),
   };
+  /** Mock del WebsocketService: sin sesiones vivas por defecto. */
   const tracking = {
     posicionesVivas: jest.fn(() => new Map()),
   };
+  /** Mock del repositorio de viaje_ubicacion. */
   const ubicacionesRepo = {
+    findOne: jest.fn(),
     insert: jest.fn().mockResolvedValue({}),
+    upsert: jest.fn().mockResolvedValue({}),
     createQueryBuilder: jest.fn(() => ({
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
@@ -42,8 +55,13 @@ describe('ViajesService', () => {
       getMany: jest.fn().mockResolvedValue([]),
     })),
   };
+  /** Repositorio generico: cualquier findOne resuelve a un objeto. */
   const ok = { findOne: jest.fn().mockResolvedValue({}) };
 
+  /**
+   * Compila el modulo con todos los repos limpiados (jest.clearAllMocks) y
+   * obtiene el service. Los mocks de este describe se reutilizan entre tests.
+   */
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -66,23 +84,47 @@ describe('ViajesService', () => {
     service = module.get<ViajesService>(ViajesService);
   });
 
+  /** El service queda instanciado y listo para usarse. */
   it('should be defined', () => {
     expect(service).toBeDefined();
   });
 
   describe('ObtenerUltimaUbicacion', () => {
-    it('marca en_curso cuando fecha_final es null', async () => {
+    it('usa la posicion de viaje_ubicacion y marca en_curso', async () => {
       viajesRepo.findOne.mockResolvedValueOnce({
+        id_viaje: 1,
+        lactitud: 10.0,
+        longitud: -66.0,
+        fecha_inicio: new Date(),
+        fecha_final: null,
+      });
+      ubicacionesRepo.findOne.mockResolvedValueOnce({
         id_viaje: 1,
         lactitud: 10.48,
         longitud: -66.9,
-        fecha_inicio: new Date(),
-        fecha_final: null,
       });
 
       const r = await service.ObtenerUltimaUbicacion(1);
 
       expect(r.en_curso).toBe(true);
+      expect(r.lat).toBe(10.48);
+      expect(ubicacionesRepo.findOne).toHaveBeenCalledWith({
+        where: { id_viaje: 1 },
+      });
+    });
+
+    it('cae a la fila del viaje si todavia no hay punto', async () => {
+      viajesRepo.findOne.mockResolvedValueOnce({
+        id_viaje: 2,
+        lactitud: 10.48,
+        longitud: -66.9,
+        fecha_inicio: new Date(),
+        fecha_final: null,
+      });
+      ubicacionesRepo.findOne.mockResolvedValueOnce(null);
+
+      const r = await service.ObtenerUltimaUbicacion(2);
+
       expect(r.lat).toBe(10.48);
     });
 
@@ -94,8 +136,62 @@ describe('ViajesService', () => {
     });
   });
 
+  describe('ObtenerUbicacion', () => {
+    it('devuelve la fila cruda de viaje_ubicacion con telemetria', async () => {
+      const recorded = new Date();
+      viajesRepo.findOne.mockResolvedValueOnce({
+        id_viaje: 1,
+        fecha_final: null,
+      });
+      ubicacionesRepo.findOne.mockResolvedValueOnce({
+        id: 'uuid-1',
+        id_viaje: 1,
+        lactitud: 10.48,
+        longitud: -66.9,
+        velocidad: 42,
+        rumbo: 90,
+        precision: 8,
+        recorded_at: recorded,
+      });
+
+      const r = await service.ObtenerUbicacion(1);
+
+      expect(r.existe_ubicacion).toBe(true);
+      expect(r.en_curso).toBe(true);
+      expect(r.ubicacion).toEqual(
+        expect.objectContaining({
+          id: 'uuid-1',
+          lactitud: 10.48,
+          longitud: -66.9,
+          velocidad: 42,
+          rumbo: 90,
+          precision: 8,
+          recorded_at: recorded,
+        }),
+      );
+    });
+
+    it('devuelve ubicacion null si el viaje aun no tiene punto', async () => {
+      viajesRepo.findOne.mockResolvedValueOnce({
+        id_viaje: 2,
+        fecha_final: null,
+      });
+      ubicacionesRepo.findOne.mockResolvedValueOnce(null);
+
+      const r = await service.ObtenerUbicacion(2);
+
+      expect(r.existe_ubicacion).toBe(false);
+      expect(r.ubicacion).toBeNull();
+    });
+
+    it('lanza NotFound si el viaje no existe', async () => {
+      viajesRepo.findOne.mockResolvedValueOnce(null);
+      await expect(service.ObtenerUbicacion(99)).rejects.toThrow(/no existe/);
+    });
+  });
+
   describe('RegistrarUbicacionManual', () => {
-    it('actualiza la fila del viaje y anade el punto al historial', async () => {
+    it('hace UPSERT en viaje_ubicacion (una fila por viaje)', async () => {
       viajesRepo.findOne.mockResolvedValue({
         id_viaje: 1,
         lactitud: 10.5,
@@ -106,13 +202,15 @@ describe('ViajesService', () => {
 
       await service.RegistrarUbicacionManual(1, 10.5, -66.8);
 
-      expect(viajesRepo.update).toHaveBeenCalledWith(
-        { id_viaje: 1 },
-        { lactitud: 10.5, longitud: -66.8 },
+      expect(ubicacionesRepo.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id_viaje: 1,
+          lactitud: 10.5,
+          longitud: -66.8,
+        }),
+        ['id_viaje'],
       );
-      expect(ubicacionesRepo.insert).toHaveBeenCalledWith(
-        expect.objectContaining({ id_viaje: 1, lactitud: 10.5 }),
-      );
+      expect(viajesRepo.update).not.toHaveBeenCalled();
     });
   });
 
@@ -154,23 +252,27 @@ describe('ViajesService', () => {
     // Caracas. 0.001 grado de latitud ~= 111 metros.
     const YO = { lat: 10.4806, lng: -66.9036 };
 
+    /** Fila cruda que devolveria el QB de candidatos. */
     const busEnBd = (id: number, lat: number, lng: number) => ({
       id_viaje: id,
-      lactitud: lat,
-      longitud: lng,
-      usuario: { username: `chofer${id}` },
-      vehiculo: { placa: `P-${id}` },
-      ruta: { numero_ruta: 'RUTA-001', nombre: 'Ruta Norte' },
+      lat,
+      lng,
+      username: `chofer${id}`,
+      placa: `P-${id}`,
+      numero_ruta: 'RUTA-001',
+      nombre_ruta: 'Ruta Norte',
     });
 
+    /** Sustituye al QB de candidatos para que devuelva estas filas. */
     const mockCandidatos = (filas: unknown[]) => {
       viajesRepo.createQueryBuilder.mockReturnValueOnce({
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
         limit: jest.fn().mockReturnThis(),
-        getMany: jest.fn().mockResolvedValue(filas),
+        getRawMany: jest.fn().mockResolvedValue(filas),
       } as never);
     };
 

@@ -4,13 +4,19 @@ import { CreatePersonaDto } from 'src/dtos/personadto/Create_persona.dto';
 import { UpdatePersonaDto } from 'src/dtos/personadto/Updatedto_Persona.dto';
 import { PersonaEntity } from 'src/entidades/persona.entity';
 import { Repository } from 'typeorm';
+/**
+ * Servicio de personas. Gestiona el CRUD de la entidad Persona, que se
+ * relaciona 1:1 con Usuario mediante la cédula.
+ */
 @Injectable()
 export class PersonasService {
+  // Repositorio TypeORM de la entidad Persona.
   constructor(
     @InjectRepository(PersonaEntity)
     private personasRepository: Repository<PersonaEntity>,
   ) {}
 
+  /** Indica si ya existe una persona con esa cédula (true) o no (false). */
   async ValidarCedula(cedula: string): Promise<boolean> {
     const persona = await this.personasRepository.findOne({
       where: { cedula: cedula },
@@ -21,6 +27,10 @@ export class PersonasService {
     return false;
   }
 
+  /**
+   * Crea una persona nueva. Antes de insertar valida que la cédula no esté ya
+   * registrada (se usa NotFoundException aunque semánticamente sea duplicado).
+   */
   async Crear_Persona(
     createPersonaDto: CreatePersonaDto,
   ): Promise<PersonaEntity> {
@@ -29,15 +39,18 @@ export class PersonasService {
         `Esta  ${createPersonaDto.cedula} ya existe.`,
       );
     }
+    // create() construye la entidad sin persistirla; save() la inserta.
     const persona = this.personasRepository.create(createPersonaDto);
 
     return this.personasRepository.save(persona);
   }
 
+  /** Devuelve todas las personas registradas. */
   async ObtenerPersonas(): Promise<PersonaEntity[]> {
     return this.personasRepository.find();
   }
 
+  /** Busca una persona por cédula; lanza NotFoundException si no existe. */
   async ObtenerPersonaPorId(cedula: string): Promise<PersonaEntity> {
     const persona = await this.personasRepository.findOne({
       where: { cedula: cedula },
@@ -48,12 +61,20 @@ export class PersonasService {
     return persona;
   }
 
+  /**
+   * Elimina la persona. Reutiliza ObtenerPersonaPorId para asegurar que exista
+   * (y lanzar 404 en caso contrario) antes de borrarla.
+   */
   async eliminarPersona(cedula: string): Promise<PersonaEntity> {
     return await this.personasRepository.remove(
       await this.ObtenerPersonaPorId(cedula),
     );
   }
 
+  /**
+   * Actualiza parcialmente la persona: cada campo se sobrescribe solo si viene
+   * en el DTO; en caso contrario se conserva el valor actual (operador ??).
+   */
   async ActualizarPersona(
     cedula: string,
     UpdatePersonaDto: UpdatePersonaDto,
@@ -67,6 +88,7 @@ export class PersonasService {
       persona.telefono = UpdatePersonaDto.telefono ?? persona.telefono;
       return this.personasRepository.save(persona);
     }
+    // Defensivo: ObtenerPersonaPorId ya lanza 404, pero se mantiene el respaldo.
     throw new NotFoundException(`Persona con cédula ${cedula} no encontrada.`);
   }
 }

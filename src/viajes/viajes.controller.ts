@@ -14,14 +14,31 @@ import {
 import { ViajesService } from './viajes.service';
 import { RegistrarUbicacionDto } from 'src/dtos/viajes/RegistrarUbicacion.dto';
 import { BuscarCercanosDto } from 'src/dtos/viajes/BuscarCercanos.dto';
+import { CreateViajesDto } from 'src/dtos/viajes/Create_Viajes.dto';
+import { UpdateViajesDto } from 'src/dtos/viajes/UpdateViajes.dto';
 
+/**
+ * API REST de viajes y de su tracking.
+ *
+ * Capa HTTP que delega toda la logica en ViajesService. Cada endpoint responde
+ * con la envoltura `{ message, control }` para darle al frontend un contrato
+ * uniforme.
+ *
+ * Reglas de dominio que este controller respeta (las impone el service):
+ * - La posicion en vivo se guarda SOLO en viaje_ubicacion (UPSERT por
+ *   id_viaje); `viaje.lactitud/longitud` es el punto inicial y no se actualiza
+ *   durante el recorrido.
+ * - Solo puede existir 1 viaje abierto (fecha_final IS NULL) por placa.
+ */
 @Controller('viajes')
 export class ViajesController {
+  /** Inyeccion del servicio que concentra la logica de negocio de viajes. */
   constructor(private readonly viajesService: ViajesService) {}
 
+  /** Crea un viaje con sus datos obligatorios (ruta, usuario, vehiculo). */
   @Post('/Crear-Viaje')
   @HttpCode(HttpStatus.CREATED)
-  async CrearViaje(@Body() CreateViajes) {
+  async CrearViaje(@Body() CreateViajes: CreateViajesDto) {
     const viaje = await this.viajesService.CreateViajes(CreateViajes);
     return {
       message: 'Se ha Creado Exitosamente el Viaje*',
@@ -29,6 +46,7 @@ export class ViajesController {
     };
   }
 
+  /** Lista el historial completo de viajes, sin ningún filtro. */
   @Get('/Obtener-Viaje')
   @HttpCode(HttpStatus.OK)
   async Obtener_Viajes() {
@@ -39,6 +57,7 @@ export class ViajesController {
     };
   }
 
+  /** Devuelve un viaje puntual con sus relaciones (usuario/vehiculo/ruta). */
   @Get('/Obtener-viaje-Id/:id')
   @HttpCode(HttpStatus.OK)
   async Obtener_viajes_ID(@Param('id') id: number) {
@@ -49,6 +68,7 @@ export class ViajesController {
     };
   }
 
+  /** Elimina fisicamente un viaje por su id. */
   @Delete('/Elimnar-viaje/:id')
   @HttpCode(HttpStatus.OK)
   async Eliminar_viaje(@Param('id') id: number) {
@@ -59,9 +79,13 @@ export class ViajesController {
     };
   }
 
+  /** Actualiza parcialmente un viaje (Patch con el body opcional). */
   @Patch('/Actualizar-viaje/:id')
   @HttpCode(HttpStatus.OK)
-  async Actualizar_Viaje(@Param('id') id: number, @Body() UpdateViaje) {
+  async Actualizar_Viaje(
+    @Param('id') id: number,
+    @Body() UpdateViaje: UpdateViajesDto,
+  ) {
     const viaje = await this.viajesService.ActualizarViaje(id, UpdateViaje);
     return {
       message: `viaje encontrado identificador: ${id} ha sido actualizado correctamente`,
@@ -73,6 +97,7 @@ export class ViajesController {
   //  TRACKING
   // ==================================================================
 
+  /** Viajes en curso (fecha_final NULL): la vista principal del mapa. */
   @Get('/Tracking/Viajes-activos')
   @HttpCode(HttpStatus.OK)
   async Obtener_Viajes_Activos() {
@@ -83,6 +108,10 @@ export class ViajesController {
     };
   }
 
+  /**
+   * Ultima posicion conocida del viaje. Sale de viaje_ubicacion con la fila
+   * del viaje como respaldo si aun no hay punto.
+   */
   @Get('/Tracking/Ultima-ubicacion/:id')
   @HttpCode(HttpStatus.OK)
   async Obtener_Ultima_Ubicacion(@Param('id', ParseIntPipe) id: number) {
@@ -93,6 +122,18 @@ export class ViajesController {
     };
   }
 
+  /** Fila cruda de viaje_ubicacion con telemetria (velocidad, rumbo, GPS). */
+  @Get('/Tracking/Ubicacion/:id')
+  @HttpCode(HttpStatus.OK)
+  async Obtener_Ubicacion(@Param('id', ParseIntPipe) id: number) {
+    const ubicacion = await this.viajesService.ObtenerUbicacion(id);
+    return {
+      message: `Fila de viaje_ubicacion del viaje ${id}`,
+      control: ubicacion,
+    };
+  }
+
+  /** Traza del recorrido (polilinea para el mapa) en una ventana de horas. */
   @Get('/Tracking/Recorrido/:id')
   @HttpCode(HttpStatus.OK)
   async Obtener_Recorrido(
@@ -108,6 +149,7 @@ export class ViajesController {
     };
   }
 
+  /** Buses en curso dentro de un radio, ordenados de mas cerca a mas lejos. */
   @Get('/Tracking/Cercanos')
   @HttpCode(HttpStatus.OK)
   async Obtener_Viajes_Cercanos(@Query() query: BuscarCercanosDto) {
@@ -137,6 +179,11 @@ export class ViajesController {
     };
   }
 
+  /**
+   * Registro manual de posicion por REST: fallback cuando el socket no pudo
+   * enviar (movil sin datos, bateria plana). El socket sigue siendo la via
+   * principal.
+   */
   @Post('/Tracking/Registrar-ubicacion/:id')
   @HttpCode(HttpStatus.OK)
   async Registrar_Ubicacion(

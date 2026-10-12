@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Version } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { CreateVehiculosDto } from 'src/dtos/vehiculosdto/Create_Vehiculos.dto';
 import { UpdateVehiculoDto } from 'src/dtos/vehiculosdto/UpdateVehiculodto.dto';
@@ -6,8 +6,14 @@ import { CooperativaEntity } from 'src/entidades/cooperativa.entity';
 import { VehiculosEntity } from 'src/entidades/vehiculos.entity';
 import { Repository } from 'typeorm';
 
+/**
+ * Servicio de vehículos. Gestiona el CRUD de VehiculosEntity y valida la
+ * relación N:1 con CooperativaEntity. Carga la relación cooperativa cuando es
+ * necesario para devolver información completa.
+ */
 @Injectable()
 export class VehiculosService {
+  // Repositorios TypeORM para vehículos y para cooperativas (validación de FK).
   constructor(
     @InjectRepository(VehiculosEntity)
     private vehiculoRepository: Repository<VehiculosEntity>,
@@ -15,10 +21,12 @@ export class VehiculosService {
     private CooperativaRepository: Repository<CooperativaEntity>,
   ) {}
 
+  /** Devuelve todos los vehículos, incluyendo la cooperativa a la que pertenecen. */
   async ObtenerVehiculos(): Promise<VehiculosEntity[]> {
     return this.vehiculoRepository.find({ relations: ['cooperativa'] });
   }
 
+  /** Busca un vehículo por placa y carga su relación con cooperativa. */
   async ObtenerVehiculoPorId(placa: string): Promise<VehiculosEntity> {
     const vehiculo = await this.vehiculoRepository.findOne({
       where: { placa },
@@ -30,6 +38,7 @@ export class VehiculosService {
     return vehiculo;
   }
 
+  /** Indica si existe un vehículo con esa placa (true/false). */
   async verificarVehiculo(placa: string): Promise<boolean> {
     const vehiculo = await this.vehiculoRepository.findOne({
       where: { placa },
@@ -37,6 +46,10 @@ export class VehiculosService {
     return !!vehiculo;
   }
 
+  /**
+   * Verifica que exista una cooperativa con el RIF dado. Lanza NotFoundException
+   * si no se encuentra y devuelve la entidad si existe.
+   */
   async verificarCooperativa(
     rif_cooperativa: string,
   ): Promise<CooperativaEntity> {
@@ -51,6 +64,10 @@ export class VehiculosService {
     return cooperativa;
   }
 
+  /**
+   * Registra un vehículo nuevo. Valida que no exista la placa y que exista la
+   * cooperativa referenciada; luego crea la entidad, asigna la relación y la persiste.
+   */
   async RegistrarVehiculo(
     CreateVehiculodto: CreateVehiculosDto,
   ): Promise<VehiculosEntity> {
@@ -73,15 +90,26 @@ export class VehiculosService {
     return this.vehiculoRepository.save(nuevoVehiculo);
   }
 
+  /**
+   * Elimina un vehículo. Reutiliza ObtenerVehiculoPorId para asegurar que existe
+   * antes de borrarlo.
+   */
   async EliminarVehiculo(placa: string): Promise<VehiculosEntity> {
     const vehiculo = await this.ObtenerVehiculoPorId(placa);
     return this.vehiculoRepository.remove(vehiculo);
   }
 
+  /**
+   * Actualiza parcialmente un vehículo. Si la placa cambia, se valida que no
+   * exista previamente y se actualiza el registro con una consulta directa para
+   * reflejar ese cambio de clave (lógica original). Luego carga el vehículo,
+   * asigna cooperativa si viene nueva y aplica los demás campos con ??.
+   */
   async ActualizarVehiculo(
     placa: string,
     updateVehiculodto: UpdateVehiculoDto,
   ): Promise<VehiculosEntity> {
+    // Si viene una nueva placa distinta, se valida unicidad y se renombra primero.
     if (updateVehiculodto.placa && updateVehiculodto.placa !== placa) {
       const placaExiste = await this.verificarVehiculo(updateVehiculodto.placa);
       if (placaExiste) {
@@ -90,6 +118,7 @@ export class VehiculosService {
         );
       }
 
+      // Actualización directa de la clave primaria "placa".
       await this.vehiculoRepository.update(placa, {
         placa: updateVehiculodto.placa,
       });
@@ -98,14 +127,17 @@ export class VehiculosService {
 
     const vehiculo = await this.ObtenerVehiculoPorId(placa);
 
+    // Si cambia la cooperativa, se valida y reasigna la relación.
     if (updateVehiculodto.cooperativa_id) {
       const cooperativa = await this.verificarCooperativa(
         updateVehiculodto.cooperativa_id,
       );
       vehiculo.cooperativa = cooperativa;
+      // Se elimina el campo temporal del DTO para no afectar el resto de asignaciones.
       delete updateVehiculodto.cooperativa_id;
     }
 
+    // Asignaciones parciales: solo sobrescriben si el valor viene definido.
     vehiculo.modelo = updateVehiculodto.modelo ?? vehiculo.modelo;
     vehiculo.color = updateVehiculodto.color ?? vehiculo.color;
     vehiculo.anofabricacion =

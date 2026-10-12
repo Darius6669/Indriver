@@ -7,15 +7,25 @@ import { WebsocketService } from './websocket.service';
 import { UsuariosEntity } from 'src/entidades/Usuarios.entity';
 import { IniciarViajeWsDto } from 'src/dtos/viajes/TrackingWs.dto';
 
+/**
+ * Pruebas unitarias de WebsocketGateway.
+ *
+ * Se mockea WebsocketService, JwtService y el repositorio de usuarios, y se usa
+ * un socket falso (mock de Socket) del que se capturan `emit`, `join`, `leave`
+ * y los handlers registrados en `on`. Asi se puede invocar cada handler como si
+ * el telefono hubiera mandado el evento.
+ */
 describe('WebsocketGateway', () => {
   let gateway: WebsocketGateway;
 
+  /** Conductor valido de ejemplo (lo devuelve el mock de usuariosRepo). */
   const conductor = {
     user_id: 7,
     username: 'conductor1',
     status: true,
     rol: 'Conductor',
   };
+  /** Admin de ejemplo: entra a mirar, pero no puede publicar. */
   const admin = {
     user_id: 1,
     username: 'root',
@@ -24,9 +34,11 @@ describe('WebsocketGateway', () => {
   };
   expect(admin.rol).not.toBe('Conductor');
 
+  /** Mock del repo de usuarios: por defecto devuelve al conductor. */
   const usuariosRepo = {
     findOne: jest.fn(async () => conductor),
   };
+  /** Mock del servicio de tracking: todos los metodos son noop por defecto. */
   const tracking = {
     setServer: jest.fn(),
     snapshotTodos: jest.fn(() => ({ total: 0, buses: [], server_time: 'x' })),
@@ -42,9 +54,11 @@ describe('WebsocketGateway', () => {
     marcarSesionOffline: jest.fn(() => []),
     getSesion: jest.fn(),
     getSesionDelSocket: jest.fn(),
+    getSesionesDelSocket: jest.fn(() => []),
     reconectar: jest.fn(),
     touch: jest.fn(),
   };
+  /** Mock del JwtService: por defecto firma a ok con el username del conductor. */
   const jwt = {
     verify: jest.fn(() => ({
       user_id: 7,
@@ -53,6 +67,7 @@ describe('WebsocketGateway', () => {
     })),
   };
 
+  /** Fabrica un socket falso con capture de emit/join/leave/on. */
   const crearSocket = (auth: Record<string, unknown> = {}) => ({
     id: 'socket-1',
     handshake: { auth, query: {} },
@@ -63,6 +78,10 @@ describe('WebsocketGateway', () => {
     on: jest.fn(),
   });
 
+  /**
+   * Antes de cada test: limpia los mocks, restaura al conductor como usuario y
+   * compila el modulo con gateway + los 3 providers mockeados.
+   */
   beforeEach(async () => {
     jest.clearAllMocks();
     usuariosRepo.findOne.mockResolvedValue(conductor);
@@ -209,7 +228,13 @@ describe('WebsocketGateway', () => {
       )?.[1];
 
       await handler(
-        { id_ruta: 'R-01', id_vehiculo: 'ABC123', lat: 999, lng: 0 },
+        {
+          id_viaje: 42,
+          id_ruta: 'R-01',
+          id_vehiculo: 'ABC123',
+          lat: 999,
+          lng: 0,
+        },
         ack,
       );
 
@@ -233,6 +258,7 @@ describe('WebsocketGateway', () => {
 
       await handler(
         {
+          id_viaje: 42,
           id_ruta: 'R-01',
           id_vehiculo: 'ABC123',
           lat: 10.48,
@@ -269,6 +295,7 @@ describe('WebsocketGateway', () => {
       await handler(
         {
           ...Object.assign(new IniciarViajeWsDto(), {
+            id_viaje: 42,
             id_ruta: 'R-01',
             id_vehiculo: 'ABC123',
             lat: 10.48,
@@ -349,8 +376,9 @@ describe('WebsocketGateway', () => {
 
   describe('rate limit', () => {
     it('corta al cliente que inunda el socket sin tumbar el viaje', async () => {
-      tracking.getSesionDelSocket.mockReturnValue({
+      tracking.getSesion.mockReturnValue({
         id_viaje: 42,
+        socketId: 'socket-1',
         username: 'conductor1',
       });
       tracking.registrarUbicacion.mockReturnValue({
@@ -363,7 +391,7 @@ describe('WebsocketGateway', () => {
         ([e]: [string]) => e === 'viaje:ubicacion',
       )?.[1];
 
-      const punto = { lat: 10.5, lng: -66.8 };
+      const punto = { id_viaje: 42, lat: 10.5, lng: -66.8 };
       // 60 es la rafaga: la 61 tiene que rebotar.
       const acks: Array<{ ok: boolean; code?: string }> = [];
       for (let i = 0; i < 61; i++) {

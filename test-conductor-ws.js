@@ -5,6 +5,10 @@
  *
  * Requiere el server arriba (npm run start:dev) y las tablas creadas:
  *   psql -U postgres -d indriver -f sql/001_crear_viaje_ubicacion.sql
+ *   psql -U postgres -d indriver -f sql/003_evitar_viajes_duplicados.sql
+ *
+ * Flujo: el viaje se crea por REST (POST /viajes/Crear-Viaje) y recien
+ * despues se enciende por socket (viaje:start con ese id_viaje).
  *
  * Uso:
  *   node test-conductor-ws.js <usuario> <password> [ruta] [placa] [vehiculo2]
@@ -68,7 +72,8 @@ async function login(username, password) {
   const body = await res.json();
   const token = body?.control?.token;
   if (!token) throw new Error(`La respuesta no trae token: ${JSON.stringify(body)}`);
-  return { token, rol: decode(token).rol };
+  const payload = decode(token);
+  return { token, rol: payload.rol, userId: payload.user_id };
 }
 
 function decode(token) {
@@ -87,7 +92,7 @@ function decode(token) {
  * @param n numero de conductor, solo para las lineas de log.
  * @returns { socket, estado }
  */
-function conectarConductor(token, numRuta, placa, n = 1) {
+function conectarConductor(token, userId, numRuta, placa, n = 1) {
   logConductor(`conectando socket con handshake.auth.token (ruta ${numRuta})`, n);
   // El token va en el handshake: es lo que valida el gateway antes de
   // registrar los handlers.
@@ -97,7 +102,7 @@ function conectarConductor(token, numRuta, placa, n = 1) {
     reconnectionDelay: 2000,
   });
 
-  const estado = { socket, idViaje: null, paso: 0, online: false };
+  const estado = { socket, token, userId, idViaje: null, paso: 0, online: false };
 
   socket.on('connect', () =>
     logConductor(`conectado (${socket.id})`, n),
@@ -130,6 +135,9 @@ function conectarConductor(token, numRuta, placa, n = 1) {
   socket.on('error:no_encontrado', (e) =>
     logConductor(`no encontrado: ${e.message}`, n),
   );
+  socket.on('error:conflicto', (e) =>
+    logConductor(`conflicto: ${e.message}`, n),
+  );
   socket.on('error:interno', (e) =>
     logConductor(`error interno: ${e.message}`, n),
   );
@@ -147,13 +155,63 @@ function conectarConductor(token, numRuta, placa, n = 1) {
   return estado;
 }
 
-function abrirViaje(estado, numRuta, placa, n) {
+/**
+ * El viaje lo crea el REST. Antes lo creaba `viaje:start`, pero eso generaba
+ * filas duplicadas cuando el mismo conductor reconectaba. Ahora el socket solo
+ * "enciende" el viaje que ya existe, usando el id_viaje que devuelve el REST.
+ */
+async function crearViajeRest(token, userId, numRuta, placa, lat, lng) {
+  const res = await fetch(`${BASE}/viajes/Crear-Viaje`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      id_user: userId,
+      id_ruta: numRuta,
+      id_vehiculo: placa,
+      lactitud: lat,
+      longitud: lng,
+      fecha_inicio: new Date().toISOString(),
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Crear-Viaje fallo (${res.status}): ${await res.text()}`);
+  }
+  const body = await res.json();
+  const viaje = body?.control;
+  if (!viaje?.id_viaje) {
+    throw new Error(`La respuesta no trae id_viaje: ${JSON.stringify(body)}`);
+  }
+  return viaje;
+}
+
+async function abrirViaje(estado, numRuta, placa, n) {
   const [lat, lng] = RUTA_POR_DEFECTO[0];
-  logConductor(`abriendo viaje en la ruta ${numRuta} / placa ${placa}`, n);
+  logConductor(`creando viaje por REST (ruta ${numRuta} / placa ${placa})`, n);
+
+  let idViaje;
+  try {
+    const viaje = await crearViajeRest(
+      estado.token,
+      estado.userId,
+      numRuta,
+      placa,
+      lat,
+      lng,
+    );
+    idViaje = viaje.id_viaje;
+    logConductor(`viaje ${idViaje} creado por REST; encendiendo por socket`, n);
+  } catch (error) {
+    logConductor(`no se pudo crear el viaje: ${error.message}`, n);
+    return;
+  }
 
   estado.socket.emit(
     'viaje:start',
-    { id_ruta: numRuta, id_vehiculo: placa, lat, lng },
+    { id_viaje: idViaje, id_ruta: numRuta, id_vehiculo: placa, lat, lng },
     (ack) => {
       if (!ack?.ok) {
         logConductor(`no se pudo abrir el viaje: ${JSON.stringify(ack)}`, n);
@@ -338,7 +396,7 @@ function conectarObservador(token, numRuta) {
     log(`\n1) POST ${BASE}/auth/login  como "${USER}"`);
     const a = await login(USER, PASS);
     log(`   OK  rol=${a.rol}`);
-    sockets.push(conectarConductor(a.token, NUMERO_RUTA, PLACA_VEHICULO, 1));
+    sockets.push(conectarConductor(a.token, a.userId, NUMERO_RUTA, PLACA_VEHICULO, 1));
 
     // 2do vehiculo en la MISMA ruta, para ver el batching de verdad.
     if (NUMERO_RUTA_2 && PLACA_VEHICULO_2) {
@@ -346,7 +404,7 @@ function conectarObservador(token, numRuta) {
       const b = await login(process.env.USER2 || USER, process.env.PASS2 || PASS);
       log(`   OK  rol=${b.rol}`);
       sockets.push(
-        conectarConductor(b.token, NUMERO_RUTA_2, PLACA_VEHICULO_2, 2),
+        conectarConductor(b.token, b.userId, NUMERO_RUTA_2, PLACA_VEHICULO_2, 2),
       );
     }
 

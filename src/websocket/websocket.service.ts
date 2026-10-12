@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -20,8 +21,6 @@ import {
 import {
   BROADCAST_INTERVAL_MS,
   DB_UPDATE_INTERVAL_MS,
-  FLUSH_INTERVAL_MS,
-  MAX_BUFFER_PUNTOS,
   MAX_SESION_HORAS,
   MIN_DISTANCIA_M,
   MIN_INTERVAL_PUNTO_MS,
@@ -31,6 +30,7 @@ import {
   roomRuta,
   roomViaje,
   SESION_TIMEOUT_MS,
+  TICK_INTERVAL_MS,
   ViajeFinalizado,
   ViajePublico,
   ViajeSession,
@@ -39,19 +39,22 @@ import {
 /** Radio medio terrestre en metros, para la formula de haversine. */
 const R_TIERRA_M = 6_371_000;
 
-/** Fila lista para el INSERT masivo en viaje_ubicacion. */
-interface FilaHistorial {
-  id_viaje: number;
-  lactitud: number;
-  longitud: number;
-  velocidad: number | null;
-  rumbo: number | null;
-  precision: number | null;
-  recorded_at: Date;
-}
-
+/**
+ * Servicio de tracking en memoria: el corazon del realtime.
+ *
+ * Mantiene un Map de sesiones por viaje (clave `id_viaje`), agrupa las
+ * posiciones por ruta para emitirlas en lotes y persiste la ultima posicion en
+ * viaje_ubicacion con throttle de 30s.
+ *
+ * Invariante de dominio que este servicio impone: una placa no puede tener mas
+ * de un viaje en curso (se comprueba en iniciarViaje).
+ *
+ * Implementa OnModuleDestroy para bajar los buffers (posiciones pendientes) al
+ * apagarse el servidor.
+ */
 @Injectable()
 export class WebsocketService implements OnModuleDestroy {
+  /** Logger propio para separar el ruido del tracking del del gateway. */
   private readonly logger = new Logger('TrackingService');
 
   /**
@@ -61,8 +64,10 @@ export class WebsocketService implements OnModuleDestroy {
    */
   private server?: Server;
 
+  /** Sesiones en memoria indexadas por id_viaje (la "verdad caliente"). */
   private sesiones = new Map<number, ViajeSession>();
-  private indicePorSocket = new Map<string, number>();
+  /** Un socket puede tener varias sesiones en vuelo (reconnects rapidos). */
+  private indicePorSocket = new Map<string, Set<number>>();
 
   /**
    * Puntos que aun no se emitieron, agrupados por ruta. Es lo que permite el
@@ -72,21 +77,29 @@ export class WebsocketService implements OnModuleDestroy {
   /** Sesiones que cambiaron y hay que refrescar en la tabla viaje. */
   private pendientesViaje = new Set<number>();
 
-  private flushTimer?: NodeJS.Timeout;
+  /** Timer del tick (timeouts + refresco de posiciones en BD). */
+  private tickTimer?: NodeJS.Timeout;
+  /** Timer del broadcast agrupado por ruta. */
   private broadcastTimer?: NodeJS.Timeout;
+  /** Timer del reaper (limpieza de sesiones muertas). */
   private reaperTimer?: NodeJS.Timeout;
 
   constructor(
+    /** Repositorio de viajes: solo se lee al iniciar y se actualiza al cerrar. */
     @InjectRepository(ViajesEntity)
     private viajesRepository: Repository<ViajesEntity>,
+    /** Repositorio de posiciones: firma el UPSERT de la ultima ubicacion. */
     @InjectRepository(ViajeUbicacionEntity)
     private ubicacionesRepository: Repository<ViajeUbicacionEntity>,
+    /** Repositorio de rutas: da la cooperativa del numero de ruta. */
     @InjectRepository(RutaEntity)
     private rutaRepository: Repository<RutaEntity>,
+    /** Repositorio de vehiculos: datos de la placa al iniciar el viaje. */
     @InjectRepository(VehiculosEntity)
     private vehiculosRepository: Repository<VehiculosEntity>,
   ) {}
 
+  /** Conecta el server de socket.io y enciende los timers globales. */
   setServer(server: Server) {
     this.server = server;
     this.iniciarTimers();
@@ -96,11 +109,15 @@ export class WebsocketService implements OnModuleDestroy {
   //  TIMERS
   // ==================================================================
 
+  /**
+   * Arranca los 3 timers del servicio. Solo se crean una vez (guard con
+   * `if (!timer)`).
+   */
   private iniciarTimers() {
     // Un unico timer global de cada tipo en vez de uno por sesion: es la forma
     // de evitar los intervalos huerfanos que dejaba el codigo anterior.
-    if (!this.flushTimer) {
-      this.flushTimer = setInterval(() => void this.tick(), FLUSH_INTERVAL_MS);
+    if (!this.tickTimer) {
+      this.tickTimer = setInterval(() => void this.tick(), TICK_INTERVAL_MS);
     }
     if (!this.broadcastTimer) {
       this.broadcastTimer = setInterval(
@@ -113,7 +130,7 @@ export class WebsocketService implements OnModuleDestroy {
       this.reaperTimer = setInterval(() => this.reaper(), 60_000);
     }
     this.logger.log(
-      `Timers: broadcast ${BROADCAST_INTERVAL_MS}ms | flush ${FLUSH_INTERVAL_MS}ms | ` +
+      `Timers: broadcast ${BROADCAST_INTERVAL_MS}ms | tick ${TICK_INTERVAL_MS}ms | ` +
         `refresco viaje ${DB_UPDATE_INTERVAL_MS}ms`,
     );
   }
@@ -122,22 +139,66 @@ export class WebsocketService implements OnModuleDestroy {
   //  CICLO DE VIDA DEL VIAJE
   // ==================================================================
 
+  /**
+   * Enciende una sesion para un viaje ya creado por el REST. Valida que el
+   * viaje exista, este abierto y pertenezca al usuario y a la placa indicados.
+   */
   async iniciarViaje(
     userId: number,
     username: string,
     socketId: string,
     dto: IniciarViajeWsDto,
   ): Promise<ViajeSession> {
-    const [ruta, vehiculo] = await Promise.all([
-      this.rutaRepository.findOne({ where: { numero_ruta: dto.id_ruta } }),
-      this.vehiculosRepository.findOne({ where: { placa: dto.id_vehiculo } }),
-    ]);
+    // El viaje ya lo creo el REST (POST /viajes/Crear-Viaje) con su usuario,
+    // vehiculo y ruta. El socket NO inserta: reutiliza el id_viaje estable.
+    // Eso termina con la ambiguedad de "buscar el viaje de mi usuario" cuando
+    // hay mas de un viaje abierto para el mismo conductor.
+    const viaje = await this.viajesRepository.findOne({
+      where: { id_viaje: dto.id_viaje },
+      relations: ['usuario', 'vehiculo', 'ruta', 'ruta.cooperativa'],
+    });
 
-    if (!ruta) {
-      throw new NotFoundException(`La ruta ${dto.id_ruta} no existe`);
+    if (!viaje) {
+      throw new NotFoundException(`El viaje ${dto.id_viaje} no existe`);
     }
-    if (!vehiculo) {
-      throw new NotFoundException(`El vehiculo ${dto.id_vehiculo} no existe`);
+    if (viaje.fecha_final) {
+      throw new UnauthorizedException(
+        `El viaje ${dto.id_viaje} ya fue finalizado. Abri uno nuevo.`,
+      );
+    }
+    if (viaje.usuario?.user_id !== userId) {
+      throw new UnauthorizedException('Ese viaje pertenece a otro conductor.');
+    }
+    if (viaje.vehiculo?.placa && viaje.vehiculo.placa !== dto.id_vehiculo) {
+      throw new NotFoundException(
+        `La placa ${dto.id_vehiculo} no corresponde al viaje ${dto.id_viaje}`,
+      );
+    }
+
+    // Idempotencia: si el mismo viaje ya esta corriendo en memoria, no se crea
+    // una sesion duplicada; se reasigna al socket que lo retomo (reconnect).
+    const existente = this.sesiones.get(viaje.id_viaje);
+    if (existente) {
+      if (existente.socketId !== socketId) {
+        this.desindexarSocket(existente.socketId, viaje.id_viaje);
+        existente.socketId = socketId;
+        existente.online = true;
+        existente.lastSeen = Date.now();
+        this.registrar(existente);
+        this.encolarBroadcast(existente);
+      }
+      return existente;
+    }
+
+    // Un recorrido a la vez por vehiculo: la placa no puede tener otro viaje
+    // en curso. Hay que finalizar el anterior primero. (Un mismo conductor si
+    // puede mover placas distintas; el vehiculo es la invariante real.)
+    for (const s of this.sesiones.values()) {
+      if (s.placa === dto.id_vehiculo) {
+        throw new ConflictException(
+          `La placa ${dto.id_vehiculo} ya tiene el viaje ${s.id_viaje} en curso. Finalizalo primero.`,
+        );
+      }
     }
 
     const ahora = new Date();
@@ -150,43 +211,26 @@ export class WebsocketService implements OnModuleDestroy {
       ts: dto.fecha_inicio ? dto.fecha_inicio.getTime() : ahora.getTime(),
     };
 
-    const viaje = this.viajesRepository.create({
-      fecha_inicio: dto.fecha_inicio ?? ahora,
-      fecha_final: null, // NULL = en curso. Se llena en finalizarViaje.
-      lactitud: dto.lat,
-      longitud: dto.lng,
-      usuario: { user_id: userId },
-      vehiculo: { placa: dto.id_vehiculo },
-      ruta: { numero_ruta: dto.id_ruta },
-      incidencia: dto.incidencia_id
-        ? { incidencias_id: dto.incidencia_id }
-        : null,
-    });
-
-    const creado = await this.viajesRepository.save(viaje);
-
     const sesion: ViajeSession = {
-      id_viaje: creado.id_viaje,
+      id_viaje: viaje.id_viaje,
       socketId,
       userId,
       username,
-      placa: dto.id_vehiculo,
-      numeroRuta: ruta.numero_ruta,
-      cooperativa: ruta.cooperativa?.rif_cooperativa ?? '',
-      fechaInicio: ahora,
+      placa: viaje.vehiculo?.placa ?? dto.id_vehiculo,
+      numeroRuta: viaje.ruta?.numero_ruta ?? dto.id_ruta,
+      cooperativa: viaje.ruta?.cooperativa?.rif_cooperativa ?? '',
+      fechaInicio: viaje.fecha_inicio ?? ahora,
       lastLocation: punto,
-      buffer: [punto],
-      lastFlushAt: Date.now(),
       lastDbUpdateAt: Date.now(),
       pendingDbUpdate: false,
       lastSeen: Date.now(),
       online: true,
     };
 
-    // Si el mismo socket reintenta, se limpia la sesion anterior para no dejar
-    // una sesion huerfana emitiendo en segundo plano.
-    this.descartarSesionesDelSocket(socketId);
     this.registrar(sesion);
+
+    // Se siembra la fila de posicion del viaje (una por viaje) desde el inicio.
+    await this.persistirUbicacion(sesion);
 
     this.logger.log(
       `Viaje ${sesion.id_viaje} iniciado por ${username} (${sesion.placa} / ruta ${sesion.numeroRuta})`,
@@ -201,12 +245,15 @@ export class WebsocketService implements OnModuleDestroy {
     return sesion;
   }
 
+  /**
+   * Cierra un viaje: persiste la ultima posicion, pone fecha_final en BD,
+   * elimina la sesion y avisa a las rooms del viaje, la ruta y el conductor.
+   */
   async finalizarViaje(
     sesion: ViajeSession,
     dto: CerrarViajeWsDto,
   ): Promise<ViajeFinalizado> {
-    // Primero se baja todo, si no se pierde el tramo final del viaje.
-    await this.flushHistorial(true);
+    // Se persiste la ultima posicion conocida antes de cerrar.
     await this.persistirUltimaUbicacion(sesion, true);
 
     const fechaFinal = dto.fecha_final ?? new Date();
@@ -256,12 +303,10 @@ export class WebsocketService implements OnModuleDestroy {
         sesion.lastSeen = Date.now();
         afectadas.push(sesion);
         // Que no se pierda lo ultimo que reporto el telefono.
-        this.encolarHistorial(sesion);
         this.encolarBroadcast(sesion);
       }
     }
     this.indicePorSocket.delete(socketId);
-    void this.flushHistorial(true);
     this.difundirPendientes();
     return afectadas;
   }
@@ -271,6 +316,9 @@ export class WebsocketService implements OnModuleDestroy {
   // ==================================================================
 
   /**
+   * Recibe el punto del telefono, lo filtra (GPS ruidoso) y lo deja listo para
+   * el proximo broadcast y el proximo UPSERT.
+   *
    * @returns `aceptado:false` con un motivo cuando el punto se descarto. El
    * cliente no es un error: es el GPS enviando ruido, y hay que filtrarlo.
    */
@@ -316,23 +364,12 @@ export class WebsocketService implements OnModuleDestroy {
     sesion.lastSeen = Date.now();
     sesion.pendingDbUpdate = true;
     this.pendientesViaje.add(sesion.id_viaje);
-    sesion.buffer.push(punto);
-    this.encolarHistorial(sesion);
     this.encolarBroadcast(sesion);
 
     return { aceptado: true, ts: punto.ts };
   }
 
-  /**
-   * Acumula la sesion para el proximo broadcast. Si el buffer de una sesion se
-   * desborda, se fuerza el flush: antes eso era 1 INSERT por cada 50 pings.
-   */
-  private encolarHistorial(sesion: ViajeSession) {
-    if (sesion.buffer.length >= MAX_BUFFER_PUNTOS) {
-      void this.flushHistorial(true);
-    }
-  }
-
+  /** Marca una sesion para que aparezca en el proximo lote de su ruta. */
   private encolarBroadcast(sesion: ViajeSession) {
     const cola = this.pendientesBroadcast.get(sesion.numeroRuta);
     if (cola) {
@@ -386,6 +423,7 @@ export class WebsocketService implements OnModuleDestroy {
     this.pendientesBroadcast.clear();
   }
 
+  /** Avisa a las rooms de que la sesion volvio a estar conectada. */
   private sesionVolvio(sesion: ViajeSession) {
     this.encolarBroadcast(sesion);
     this.difundirPendientes();
@@ -404,6 +442,10 @@ export class WebsocketService implements OnModuleDestroy {
   //  PERSISTENCIA THROTELEADA
   // ==================================================================
 
+  /**
+   * Corazon del tick: marca offline a las sesiones sin ping reciente y luego
+   * baja las posiciones pendientes a la BD.
+   */
   private async tick() {
     const ahora = Date.now();
 
@@ -418,69 +460,13 @@ export class WebsocketService implements OnModuleDestroy {
       }
     }
 
-    await this.flushHistorial(false);
     await this.refrescarUltimasUbicaciones();
   }
 
   /**
-   * Un SOLO INSERT multi-fila con los puntos de TODAS las sesiones. Antes eran
-   * N inserts cada 10s (uno por bus); con 100 buses son 100 viajes al DB que
-   * se evitan solo acumulando antes de escribir.
-   */
-  private async flushHistorial(force: boolean) {
-    if (force && this.sesiones.size === 0) return;
-    if (!force && this.ultimoFlush + FLUSH_INTERVAL_MS > Date.now()) return;
-
-    const filas: FilaHistorial[] = [];
-    /** Para poder devolver los puntos a su sesion si el INSERT falla. */
-    const origenes: Array<{
-      sesion: ViajeSession;
-      puntos: PuntoUbicacion[];
-    }> = [];
-
-    for (const sesion of this.sesiones.values()) {
-      if (sesion.buffer.length === 0) continue;
-      for (const p of sesion.buffer) {
-        filas.push({
-          id_viaje: sesion.id_viaje,
-          lactitud: p.lat,
-          longitud: p.lng,
-          velocidad: p.velocidad,
-          rumbo: p.rumbo,
-          precision: p.precision,
-          recorded_at: new Date(p.ts),
-        });
-      }
-      origenes.push({ sesion, puntos: sesion.buffer });
-      sesion.buffer = [];
-      sesion.lastFlushAt = Date.now();
-    }
-
-    if (filas.length === 0) return;
-    this.ultimoFlush = Date.now();
-
-    try {
-      await this.ubicacionesRepository.insert(filas);
-      this.logger.debug(
-        `${filas.length} puntos -> ${origenes.length} viaje(s) en 1 INSERT`,
-      );
-    } catch (error) {
-      // No se pierden: cada punto vuelve al buffer de su sesion.
-      for (const o of origenes) {
-        o.sesion.buffer.unshift(...o.puntos);
-      }
-      this.logger.error(
-        `Fallo el INSERT de ${filas.length} puntos, devueltos a los buffers: ${(error as Error).message}`,
-      );
-    }
-  }
-
-  private ultimoFlush = 0;
-
-  /**
-   * Refresca viaje.lactitud/longitud (la ultima posicion conocida) de todas las
-   * sesiones que cambiaron. Throttleado a 30s por sesion: escribir en cada ping
-   * seria martillar la tabla mas consultada de la base.
+   * Refresca la fila de viaje_ubicacion (la ultima posicion conocida) de todas
+   * las sesiones que cambiaron. Throttleado a 30s por sesion: escribir en cada
+   * ping seria martillar la tabla mas consultada de la base.
    */
   private async refrescarUltimasUbicaciones() {
     if (this.pendientesViaje.size === 0) return;
@@ -500,18 +486,12 @@ export class WebsocketService implements OnModuleDestroy {
 
     if (aActualizar.length === 0) return;
 
-    // En paralelo: a 30s de throttle son ~3 UPDATEs/seg con 100 buses, no
-    // compensa montar un UPDATE ... FROM (VALUES ...).
+    // En paralelo: a 30s de throttle son ~3 UPSERTs/seg con 100 buses, no
+    // compensa montar un UPSERT ... FROM (VALUES ...).
     await Promise.all(
       aActualizar.map(async (sesion) => {
         try {
-          const { lat, lng } = sesion.lastLocation;
-          await this.viajesRepository.update(
-            { id_viaje: sesion.id_viaje },
-            { lactitud: lat, longitud: lng },
-          );
-          sesion.lastDbUpdateAt = Date.now();
-          sesion.pendingDbUpdate = false;
+          await this.persistirUbicacion(sesion);
         } catch (error) {
           // Se reencola para el proximo tick.
           this.pendientesViaje.add(sesion.id_viaje);
@@ -524,6 +504,29 @@ export class WebsocketService implements OnModuleDestroy {
   }
 
   /**
+   * Guarda la posicion actual en viaje_ubicacion: UNA fila por viaje que se
+   * actualiza (UPSERT) con el ultimo punto conocido.
+   */
+  private async persistirUbicacion(sesion: ViajeSession): Promise<void> {
+    const { lat, lng, velocidad, rumbo, precision, ts } = sesion.lastLocation;
+    await this.ubicacionesRepository.upsert(
+      {
+        id_viaje: sesion.id_viaje,
+        lactitud: lat,
+        longitud: lng,
+        velocidad,
+        rumbo,
+        precision,
+        recorded_at: new Date(ts),
+      },
+      ['id_viaje'],
+    );
+    sesion.lastDbUpdateAt = Date.now();
+    sesion.pendingDbUpdate = false;
+    this.pendientesViaje.delete(sesion.id_viaje);
+  }
+
+  /**
    * Force encola el refresh de una sesion. Se usa al finalizar y al apagar, no
    * durante el viaje normal (ahi manda el throttle de 30s).
    */
@@ -532,14 +535,7 @@ export class WebsocketService implements OnModuleDestroy {
     if (!force && Date.now() - sesion.lastDbUpdateAt < DB_UPDATE_INTERVAL_MS) {
       return;
     }
-    const { lat, lng } = sesion.lastLocation;
-    await this.viajesRepository.update(
-      { id_viaje: sesion.id_viaje },
-      { lactitud: lat, longitud: lng },
-    );
-    sesion.lastDbUpdateAt = Date.now();
-    sesion.pendingDbUpdate = false;
-    this.pendientesViaje.delete(sesion.id_viaje);
+    await this.persistirUbicacion(sesion);
   }
 
   /**
@@ -567,11 +563,26 @@ export class WebsocketService implements OnModuleDestroy {
   //  CONSULTAS
   // ==================================================================
 
+  /** Sesion activa del socket (la primera si tiene varias). */
   getSesionDelSocket(socketId: string): ViajeSession | undefined {
-    const idViaje = this.indicePorSocket.get(socketId);
-    return idViaje ? this.sesiones.get(idViaje) : undefined;
+    const ids = this.indicePorSocket.get(socketId);
+    if (!ids || ids.size === 0) return undefined;
+    return this.sesiones.get(ids.values().next().value as number);
   }
 
+  /** Todas las sesiones del socket (en general una, pero puede haber mas). */
+  getSesionesDelSocket(socketId: string): ViajeSession[] {
+    const ids = this.indicePorSocket.get(socketId);
+    if (!ids) return [];
+    const sesiones: ViajeSession[] = [];
+    for (const idViaje of ids) {
+      const sesion = this.sesiones.get(idViaje);
+      if (sesion) sesiones.push(sesion);
+    }
+    return sesiones;
+  }
+
+  /** Sesion de un viaje por su id_viaje. */
   getSesion(idViaje: number): ViajeSession | undefined {
     return this.sesiones.get(idViaje);
   }
@@ -599,14 +610,10 @@ export class WebsocketService implements OnModuleDestroy {
     // El socket viejo murio hace rato: se limpia su indice para que no apunte
     // a una sesion que ahora pertenece a otro socket.
     if (sesion.socketId !== socketId) {
-      if (this.indicePorSocket.get(sesion.socketId) === idViaje) {
-        this.indicePorSocket.delete(sesion.socketId);
-      }
+      this.desindexarSocket(sesion.socketId, idViaje);
       sesion.socketId = socketId;
       sesion.online = true;
       sesion.lastSeen = Date.now();
-      // Un buffer grande significa que estuvo sin red: se apura la escritura.
-      if (sesion.buffer.length > 0) void this.flushHistorial(true);
     }
 
     this.registrar(sesion);
@@ -661,6 +668,8 @@ export class WebsocketService implements OnModuleDestroy {
     };
   }
 
+  /** Snapshot global: todos los buses de este proceso, para /Tracking/... y la
+   * lista de conexion. */
   snapshotTodos(): {
     total: number;
     buses: ViajePublico[];
@@ -676,15 +685,12 @@ export class WebsocketService implements OnModuleDestroy {
   /** Metricas de salud, para exponerlas en un endpoint de admin. */
   stats() {
     let online = 0;
-    let enBuffer = 0;
     for (const s of this.sesiones.values()) {
       if (s.online) online++;
-      enBuffer += s.buffer.length;
     }
     return {
       sesiones_activas: this.sesiones.size,
       sesiones_online: online,
-      puntos_en_buffer: enBuffer,
       rutas_con_pendientes: this.pendientesBroadcast.size,
       viajes_por_actualizar: this.pendientesViaje.size,
     };
@@ -721,21 +727,35 @@ export class WebsocketService implements OnModuleDestroy {
   //  INTERNO
   // ==================================================================
 
+  /** Da de alta una sesion en los dos indices (por id y por socket). */
   private registrar(sesion: ViajeSession) {
     this.sesiones.set(sesion.id_viaje, sesion);
-    this.indicePorSocket.set(sesion.socketId, sesion.id_viaje);
+    let ids = this.indicePorSocket.get(sesion.socketId);
+    if (!ids) {
+      ids = new Set<number>();
+      this.indicePorSocket.set(sesion.socketId, ids);
+    }
+    ids.add(sesion.id_viaje);
   }
 
+  /** Da de baja una sesion de todos los indices y de los pendientes. */
   private eliminar(idViaje: number) {
     const sesion = this.sesiones.get(idViaje);
     if (!sesion) return;
     this.sesiones.delete(idViaje);
     this.pendientesViaje.delete(idViaje);
-    if (this.indicePorSocket.get(sesion.socketId) === idViaje) {
-      this.indicePorSocket.delete(sesion.socketId);
-    }
+    this.desindexarSocket(sesion.socketId, idViaje);
   }
 
+  /** Quita el id del indice del socket y borra el Set si quedo vacio. */
+  private desindexarSocket(socketId: string, idViaje: number) {
+    const ids = this.indicePorSocket.get(socketId);
+    if (!ids) return;
+    ids.delete(idViaje);
+    if (ids.size === 0) this.indicePorSocket.delete(socketId);
+  }
+
+  /** Ids de los viajes que tiene en vuelo un socket (por fuerza bruta). */
   private sesionesDelSocket(socketId: string): number[] {
     const ids: number[] = [];
     for (const [idViaje, sesion] of this.sesiones) {
@@ -744,23 +764,7 @@ export class WebsocketService implements OnModuleDestroy {
     return ids;
   }
 
-  /** Cierra cualquier sesion previa del socket antes de abrir una nueva. */
-  private descartarSesionesDelSocket(socketId: string) {
-    const aDescartar = this.sesionesDelSocket(socketId);
-    if (aDescartar.length === 0) return; // no hay nada que descartar ni que volcar
-
-    for (const idViaje of aDescartar) {
-      const sesion = this.sesiones.get(idViaje);
-      if (!sesion) continue;
-      this.encolarHistorial(sesion);
-      this.eliminar(idViaje);
-      this.server?.to(roomViaje(idViaje)).emit('viaje:descartado', {
-        id_viaje: idViaje,
-      });
-    }
-    void this.flushHistorial(true);
-  }
-
+  /** Distancia en metros entre dos coordenadas (haversine). */
   private distanciaMetros(
     lat1: number,
     lng1: number,
@@ -781,10 +785,10 @@ export class WebsocketService implements OnModuleDestroy {
    * viaje se pierden.
    */
   async onModuleDestroy() {
-    for (const t of [this.flushTimer, this.broadcastTimer, this.reaperTimer]) {
+    for (const t of [this.tickTimer, this.broadcastTimer, this.reaperTimer]) {
       if (t) clearInterval(t);
     }
-    this.flushTimer = undefined;
+    this.tickTimer = undefined;
     this.broadcastTimer = undefined;
     this.reaperTimer = undefined;
 
@@ -792,7 +796,6 @@ export class WebsocketService implements OnModuleDestroy {
     this.logger.log(
       `Volcando ${this.sesiones.size} sesion(es) antes de apagar...`,
     );
-    await this.flushHistorial(true);
     this.difundirPendientes();
     await Promise.all(
       [...this.sesiones.values()].map((s) =>

@@ -89,6 +89,7 @@
     <script>
       let s = null;
       let idViaje = null;
+      let userId = null;
 
       function pintar(txt, clase = 'info') {
         const l = document.getElementById('log');
@@ -109,6 +110,9 @@
           const j = await r.json();
           if (!j.control?.token) throw new Error(JSON.stringify(j.message));
           document.getElementById('token').value = j.control.token;
+          // El token trae el user_id en el payload (base64): lo usamos para
+          // crear el viaje por REST.
+          userId = JSON.parse(atob(j.control.token.split('.')[1])).user_id;
           pintar('login OK -> token listo', 'ok');
         } catch (e) {
           pintar('login fallo: ' + e.message, 'mal');
@@ -131,6 +135,7 @@
       }
 
       const p = (lat, lng, vel = 30) => ({
+        id_viaje: idViaje,
         id_ruta: ruta.value,
         id_vehiculo: placa.value,
         lat: Number(lat),
@@ -140,11 +145,44 @@
         precision: 8,
       });
 
-      function start() {
-        s.emit('viaje:start', p(lat.value, lng.value), (ack) => {
-          pintar('ack viaje:start ' + JSON.stringify(ack), ack.ok ? 'ok' : 'mal');
-          if (ack.ok) idViaje = ack.id_viaje;
-        });
+      // El viaje ya no lo crea el socket: lo crea el REST y aca solo se
+      // enciende con ese id_viaje.
+      async function start() {
+        const token = document.getElementById('token').value;
+        if (!token || !userId) return pintar('primero hacé el login', 'mal');
+        try {
+          const r = await fetch(`${url.value}/viajes/Crear-Viaje`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              id_user: userId,
+              id_ruta: ruta.value,
+              id_vehiculo: placa.value,
+              lactitud: Number(lat.value),
+              longitud: Number(lng.value),
+              fecha_inicio: new Date().toISOString(),
+            }),
+          });
+          const j = await r.json();
+          const viaje = j.control;
+          if (!viaje?.id_viaje) throw new Error(JSON.stringify(j.message));
+          idViaje = viaje.id_viaje;
+          pintar(`viaje ${idViaje} creado por REST; encendiendo por socket`, 'ok');
+        } catch (e) {
+          return pintar('Crear-Viaje fallo: ' + e.message, 'mal');
+        }
+
+        s.emit(
+          'viaje:start',
+          { id_viaje: idViaje, id_ruta: ruta.value, id_vehiculo: placa.value, lat: Number(lat.value), lng: Number(lng.value) },
+          (ack) => {
+            pintar('ack viaje:start ' + JSON.stringify(ack), ack.ok ? 'ok' : 'mal');
+            if (!ack.ok) idViaje = null;
+          },
+        );
       }
 
       function gps() {

@@ -10,29 +10,36 @@ import { IsNotEmpty, IsNumber, IsOptional } from 'class-validator';
 import { ViajesEntity } from './Viajes.entity';
 
 /**
- * Historial append-only de ubicaciones de un viaje.
+ * Posicion actual del viaje.
  *
- * Se separa de la tabla `viaje` a proposito: `viaje.lactitud/longitud` guarda
- * solo la ULTIMA posicion conocida y se refresca cada ~30s, mientras que aqui
- * cae un INSERT por cada punto recibido (batcheado) para poder reconstruir la
- * polilinea del recorrido.
+ * UNA sola fila por viaje (id_viaje es unico): el server la actualiza (UPSERT)
+ * con el ultimo punto conocido. Ya no es un historial append-only; la tabla
+ * `viaje` guarda el viaje y esta guarda donde esta el bus ahora.
  */
 @Entity('viaje_ubicacion')
+@Index('ux_viaje_ubicacion_viaje', ['id_viaje'], { unique: true })
 @Index('idx_viaje_ubicacion_viaje_fecha', ['id_viaje', 'recorded_at'])
 export class ViajeUbicacionEntity {
+  /** PK autogenerada tipo UUID (columna `id`). */
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
+  /**
+   * FK al viaje (columna `id_viaje`, entero). Junto con la FK `viaje.id_viaje`,
+   * esta columna tiene indice UNIQUE para forzar una sola fila por viaje.
+   */
   @Column({ type: 'int' })
   @IsNumber()
   @IsNotEmpty()
   id_viaje!: number;
 
+  /** Latitud actual del bus (columna `lactitud`, doble precision). */
   @Column({ type: 'double precision' })
   @IsNumber()
   @IsNotEmpty()
   lactitud!: number;
 
+  /** Longitud actual del bus (columna `longitud`, doble precision). */
   @Column({ type: 'double precision' })
   @IsNumber()
   @IsNotEmpty()
@@ -53,9 +60,14 @@ export class ViajeUbicacionEntity {
   @IsOptional()
   precision?: number | null;
 
+  /** Momento en que se registro la posicion (columna `recorded_at`, por defecto la hora actual). */
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   recorded_at!: Date;
 
+  /**
+   * Relacion N:1 con `ViajesEntity`: viaje al que pertenece esta posicion.
+   * FK `id_viaje`; al borrar el viaje la fila se elimina en cascada (CASCADE).
+   */
   @ManyToOne(() => ViajesEntity, (viaje) => viaje.ubicaciones, {
     onDelete: 'CASCADE',
   })

@@ -5,6 +5,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { VehiculosEntity } from 'src/entidades/vehiculos.entity';
 import { CooperativaEntity } from 'src/entidades/cooperativa.entity';
 
+/**
+ * Módulo de vehículos. Registra los repositorios de VehiculosEntity y
+ * CooperativaEntity, ya que el servicio realiza validaciones y cargas de relación.
+ */
 @Module({
   imports: [TypeOrmModule.forFeature([VehiculosEntity, CooperativaEntity])],
   controllers: [VehiculosController],

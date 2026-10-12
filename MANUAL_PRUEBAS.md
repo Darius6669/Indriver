@@ -124,12 +124,14 @@ Esto es importante y es la causa número uno de confusiones:
 
 | Placas | Situación |
 |---|---|
-| `TEST-01` … `TEST-04` | **Libres.** Usá estas para abrir viajes por socket. |
+| `TEST-01` … `TEST-04` | **Libres.** Usá estas para crear viajes (REST + `viaje:start`). |
 | `TEST-05`, `TEST-06`, `TEST-07` | **Ya tienen un viaje abierto** (los siembra el script). Son los que aparecen en "buses cercanos". |
 
-Si intentás abrir un viaje en una placa que ya tiene uno, el server te lo rebota con
-`{ok:false, code:"validacion"}`. No es un error del script: es la regla de
-"un vehículo, un viaje a la vez".
+Si intentás crear un viaje en una placa que ya tiene uno abierto, el REST **no** crea otro: te
+devuelve el viaje que ya estaba abierto. Y si mandás `viaje:start` con un `id_viaje` ajeno o con
+una placa que no coincide con la del viaje, el socket lo rebota con `{ok:false, code:"conflicto"}`.
+No es un error del script: es la regla de "un vehículo, un viaje a la vez". (Un mismo conductor
+sí puede mover placas distintas; la invariante es por vehículo, no por persona.)
 
 ### Dónde están los buses
 
@@ -233,6 +235,10 @@ Tres cosas que tienen que cumplirse:
 node test-buses-cercanos.js conductor_test clave123 RUTA-001 TEST-01
 ```
 
+El script usa **dos conductores** (por defecto `conductor_test` y `conductor2_test`), pero es
+solo por claridad: como la invariante es por **vehículo**, alcanzaría con uno. Los dos últimos
+argumentos opcionales son `[usuario2] [password2]`.
+
 O sin argumentos, porque la seed ya dejó buses en distintas distancias:
 
 ```bash
@@ -307,8 +313,10 @@ O sea: si corrés `npm run seed` y abrís el probador sin conectar ningún condu
 error. Los viajes de la seed son filas de la base, sin sesión viva, así que
 `Buses cercanos` los ve y `Viajes-activos` no.
 
-Para verlos como "activos", abrí un viaje por socket primero. La diferencia se nota en
-el `online` de la respuesta de cercanos: los de la seed salen `false`.
+Para verlos como "activos", creá un viaje por REST (`POST /viajes/Crear-Viaje`) y encendelo
+por socket (`viaje:start`), o simplemente usá el botón **viaje:start** del probador, que hace
+las dos cosas. La diferencia se nota en el `online` de la respuesta de cercanos: los de la
+seed salen `false`.
 
 ### Pruebas de borde
 
@@ -345,8 +353,8 @@ Las dos últimas devuelven `400` con el motivo exacto:
 | `suscribir:ruta` | cualquiera | `{id_ruta}` | Mirar una ruta sin ser conductor |
 | `desuscribir:ruta` | cualquiera | `{id_ruta}` | Salir de esa ruta |
 | `viajes:activos` | cualquiera | — | Listar los viajes en curso |
-| `viaje:start` | **Conductor** | `{id_ruta, id_vehiculo, lat, lng}` | Abrir viaje |
-| `viaje:ubicacion` | **Conductor** | `{lat, lng, velocidad, rumbo, precision}` | Mandar GPS |
+| `viaje:start` | **Conductor** | `{id_viaje, id_ruta, id_vehiculo, lat, lng}` | Encender un viaje ya creado por REST |
+| `viaje:ubicacion` | **Conductor** | `{id_viaje, lat, lng, velocidad, rumbo, precision}` | Mandar GPS |
 | `viaje:reconectar` | **Conductor** | `{id_viaje}` | Retomar tras perder señal |
 | `viaje:finalizar` | **Conductor** | `{id_viaje}` | Cerrar |
 | `viaje:pausa` | **Conductor** | `{id_viaje}` | Pausar |
@@ -368,6 +376,7 @@ Las dos últimas devuelven `400` con el motivo exacto:
 | `error:validacion` | El payload vino mal, con el detalle del campo |
 | `error:no_autorizado` | Token malo o usuario inactivo |
 | `error:no_encontrado` | Ruta o vehículo inexistente |
+| `error:conflicto` | Ya hay un viaje abierto con esa placa |
 | `error:interno` | Falló el servidor |
 
 ### Los errores de ack
@@ -383,11 +392,12 @@ Los `code` que vas a ver:
 
 | code | Qué significa |
 |---|---|
-| `validacion` | Payload mal formado, o la placa ya tiene un viaje |
+| `validacion` | Payload mal formado |
 | `sin_viaje_activo` | Mandás GPS sin haber abierto viaje |
 | `rol_sin_permiso` | Un `Admin` intentó publicar |
 | `rate_limit` | Más de 30 eventos por segundo |
 | `no_encontrado` | Ruta o vehículo no existe |
+| `conflicto` | Esa placa ya tiene un viaje abierto |
 | `no_autorizado` | Token vencido o usuario `status: false` |
 
 ---
@@ -405,7 +415,8 @@ abierto). El orden de los botones es el del ciclo de vida real:
 
 1. **Login** — te llena el token solo.
 2. **Conectar** — se autentica y empieza a mostrar todo lo que entra, con `onAny`.
-3. **viaje:start** — abre el viaje con la placa de la casilla.
+3. **viaje:start** — crea el viaje por REST (`POST /viajes/Crear-Viaje`) con la placa
+   de la casilla y después lo enciende por socket con ese `id_viaje`.
 4. **viaje:ubicacion** — manda un punto de GPS. Tocalo varias veces seguidas y vas a
    ver aparecer `intervalo_muy_corto` (ver el problema número 1 de la sección 8).
 5. **viaje:reconectar** — simula que volviste de perder señal.

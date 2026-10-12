@@ -4,6 +4,10 @@ import { CoperativaController } from './coperativa.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CooperativaEntity } from 'src/entidades/cooperativa.entity';
 
+/**
+ * Módulo de cooperativas. Registra el repositorio de CooperativaEntity para
+ * que CooperativaService pueda utilizarlo.
+ */
 @Module({
   imports: [TypeOrmModule.forFeature([CooperativaEntity])],
   controllers: [CoperativaController],
