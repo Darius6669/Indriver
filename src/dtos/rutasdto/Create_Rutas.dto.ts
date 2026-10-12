@@ -55,7 +55,10 @@ export class CreateRutasDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  @Matches(/^[0-9]+$/, { message: 'La cédula debe contener solo números' })
+    @Matches(/^[VvEeJjPpGgCc]-\d{8}-\d$/, {
+    message:
+      'El RIF debe tener el formato L-12345678-9 (letra válida: V, E, J, P, G o C, seguida de 8 dígitos, un guion y un dígito verificador)',
+  })
   cooperativa_id!: string;
 
   /**
