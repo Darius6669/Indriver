@@ -17,7 +17,7 @@ export class CreateRutasDto {
    * @IsInt exige entero y @IsNotEmpty obliga a enviarlo.
    * Nota: el tipo declarado es string aunque la validacion pida entero.
    */
-  @IsInt()
+  @IsString()
   @IsNotEmpty()
   numero_ruta!: string;
 
