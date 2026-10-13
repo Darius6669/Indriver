@@ -78,7 +78,7 @@ export class ViajesEntity {
 
   /**
    * Relacion N:1 con `RutaEntity`: ruta que se esta ejecutando.
-   * FK `ruta_id` en esta tabla.
+   * FK `ruta_id` (ahora INTEGER) en esta tabla.
    */
   @ManyToOne(() => RutaEntity, (ruta) => ruta.viajes)
   @JoinColumn({ name: 'ruta_id' })

@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Param,
   Patch,
   Post,
   UseGuards,
@@ -53,9 +54,9 @@ export class RutasController {
    * @param numero_ruta Número identificador de la ruta.
    * @returns La ruta encontrada.
    */
-  @Post('destino/filter')
+  @Get('destino/filter/:numero_ruta')
   @HttpCode(HttpStatus.OK)
-  async obtenerRutaPorId(@Body('numero_ruta') numero_ruta: string) {
+  async obtenerRutaPorId(@Param('numero_ruta') numero_ruta: string) {
     return this.rutasService.obtenerRutaPorId(numero_ruta);
   }
 

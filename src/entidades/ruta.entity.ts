@@ -4,7 +4,7 @@ import {
   JoinColumn,
   ManyToOne,
   OneToMany,
-  PrimaryColumn,
+  PrimaryGeneratedColumn,
 } from 'typeorm';
 import { IsNotEmpty } from 'class-validator';
 import { CooperativaEntity } from './cooperativa.entity';
@@ -19,8 +19,12 @@ import { ViajesEntity } from './Viajes.entity';
  */
 @Entity('ruta')
 export class RutaEntity {
-  /** PK natural (numero_ruta, max 50 caracteres); identifica la ruta. */
-  @PrimaryColumn({ type: 'varchar', length: 50 })
+  /** Nueva PK autogenerada (id) de la tabla `ruta`. */
+  @PrimaryGeneratedColumn()
+  id!: number;
+
+  /** Numero de ruta (columna `numero_ruta`, max 50 caracteres). Ya no es PK. */
+  @Column({ type: 'varchar', length: 50 })
   @IsNotEmpty()
   numero_ruta!: string;
 

@@ -13,8 +13,8 @@ export class CreateCooperativaDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  @Matches(/^[0-9]+$/, { message: 'La cédula debe contener solo números' })
-  rif_cooperativa: string;
+  @Matches(/^[A-Za-z]-\d+-[0-9A-Za-z]$/, { message: 'La cédula debe contener solo letras y números' })
+  rif_cooperativa!: string;
 
   /**
    * Nombre de la cooperativa.
@@ -24,7 +24,7 @@ export class CreateCooperativaDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  nombre: string;
+  nombre!: string;
 
   /**
    * Ubicacion o sede de la cooperativa.
@@ -34,7 +34,7 @@ export class CreateCooperativaDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  ubicacion: string;
+  ubicacion!: string;
 
   /**
    * Descripcion libre de la cooperativa.
@@ -42,7 +42,7 @@ export class CreateCooperativaDto {
    */
   @IsString()
   @IsNotEmpty()
-  descripcion: string;
+  descripcion!: string;
 
   /**
    * Horario de operacion (texto libre, ej. "6am - 9pm").
@@ -50,5 +50,5 @@ export class CreateCooperativaDto {
    */
   @IsString()
   @IsNotEmpty()
-  horario: string;
+  horario!: string;
 }

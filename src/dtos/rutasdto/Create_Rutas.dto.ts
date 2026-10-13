@@ -17,7 +17,7 @@ export class CreateRutasDto {
    * @IsInt exige entero y @IsNotEmpty obliga a enviarlo.
    * Nota: el tipo declarado es string aunque la validacion pida entero.
    */
-  @IsInt()
+  @IsString()
   @IsNotEmpty()
   numero_ruta!: string;
 
@@ -55,7 +55,7 @@ export class CreateRutasDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  @Matches(/^[0-9]+$/, { message: 'La cédula debe contener solo números' })
+  @Matches(/^[A-Za-z]-\d+-[0-9A-Za-z]$/, { message: 'La cédula debe contener solo letras y números' })
   cooperativa_id!: string;
 
   /**

@@ -76,8 +76,8 @@ export class RutasService {
    * @returns La ruta encontrada con su cooperativa.
    * @throws NotFoundException si no existe.
    */
-  async obtenerRutaPorId(numero_ruta: string): Promise<RutaEntity> {
-    const ruta = await this.rutaRepository.findOne({
+  async obtenerRutaPorId(numero_ruta: string): Promise<RutaEntity[]> {
+    const ruta = await this.rutaRepository.find({
       where: { numero_ruta },
       relations: ['cooperativa'],
     });
