@@ -39,7 +39,7 @@ export class CreateVehiculosDto {
    * @IsISO8601 exige fecha en formato ISO 8601; @IsNotEmpty obliga a
    * enviarla.
    */
-  @IsISO8601()
+  //@IsISO8601()
   @IsNotEmpty()
   anofabricacion: Date;
 
