@@ -68,7 +68,7 @@ export class CreateViajesDto {
    */
   @IsString()
   @IsNotEmpty()
-  @MinLength(10)
+  @MinLength(5)
   @MaxLength(100)
   id_vehiculo!: string;
 
@@ -79,7 +79,7 @@ export class CreateViajesDto {
    */
   @IsString()
   @IsNotEmpty()
-  @MinLength(10)
+  @MinLength(5)
   @MaxLength(100)
   id_ruta!: string;
 
