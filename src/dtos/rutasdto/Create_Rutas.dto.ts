@@ -55,7 +55,7 @@ export class CreateRutasDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  @Matches(/^[A-Za-z]-\d+-[0-9A-Za-z]$/, { message: 'La cédula debe contener solo letras y números' })
+  //@Matches(/^[A-Za-z]-\d+-[0-9A-Za-z]$/, { message: 'La cédula debe contener solo letras y números' })
   cooperativa_id!: string;
 
   /**
