@@ -17,8 +17,6 @@ export class CreateViajesDto {
    * Identificador del viaje.
    * @IsInt exige entero. No lleva @IsNotEmpty, pero es obligatorio por tipo.
    */
-  @IsInt()
-  id_viaje!: number;
 
   /**
    * Fecha/hora de inicio del viaje.
