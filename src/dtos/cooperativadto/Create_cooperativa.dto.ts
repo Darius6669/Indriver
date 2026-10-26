@@ -28,7 +28,7 @@ export class CreateCooperativaDto {
 
   /**
    * Ubicacion o sede de la cooperativa.
-   * @IsString exige texto; @IsNotEmpty obliga a enviarla; @MaxLength(50)
+   * @IsString exige texto; @IsNotEmpty obliga a enviarla; @MaxLength(50)saasd
    * limita a 50 caracteres.
    */
   @IsString()

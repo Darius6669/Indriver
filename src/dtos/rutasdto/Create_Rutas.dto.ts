@@ -7,7 +7,7 @@ import {
 } from 'class-validator';
 
 /**
- * Cuerpo para crear una nueva ruta de transporte.
+ * Cuerpo para crear una nueva ruta de transporte.123123
  */
 export class CreateRutasDto {
   // Define las propiedades necesarias para la creación de una ruta
