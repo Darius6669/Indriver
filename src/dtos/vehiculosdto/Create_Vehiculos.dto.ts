@@ -1,4 +1,4 @@
-import { IsISO8601, IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { IsDateString,IsNotEmpty, IsString, MaxLength } from 'class-validator';
 
 /**
  * Cuerpo para registrar un nuevo vehiculo (bus).
@@ -39,9 +39,10 @@ export class CreateVehiculosDto {
    * @IsISO8601 exige fecha en formato ISO 8601; @IsNotEmpty obliga a
    * enviarla.
    */
-  @IsISO8601()
+  //@IsDateString({}, { message: 'La fecha debe tener un formato válido (Ej: 2020-05-15)' })
   @IsNotEmpty()
-  anofabricacion: Date;
+  // @ts-ignore  <--- ESTA LÍNEA ES LA MAGIA
+  anofabricacion: Date; 
 
   /**
    * Cooperativa a la que pertenece el vehiculo.

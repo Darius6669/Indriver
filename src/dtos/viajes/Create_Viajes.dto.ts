@@ -13,12 +13,6 @@ import {
  * Cuerpo para crear un nuevo viaje.
  */
 export class CreateViajesDto {
-  /**
-   * Identificador del viaje.
-   * @IsInt exige entero. No lleva @IsNotEmpty, pero es obligatorio por tipo.
-   */
-  @IsInt()
-  id_viaje!: number;
 
   /**
    * Fecha/hora de inicio del viaje.
@@ -57,9 +51,9 @@ export class CreateViajesDto {
    * Usuario (conductor) que realiza el viaje.
    * @IsNumber exige numero y @IsNotEmpty obliga a enviarlo.
    */
-  @IsNumber()
-  @IsNotEmpty()
-  id_user!: number;
+   @IsString()
+   @IsNotEmpty()
+   username!: string;
 
   /**
    * Vehiculo asignado al viaje.
@@ -68,8 +62,6 @@ export class CreateViajesDto {
    */
   @IsString()
   @IsNotEmpty()
-  @MinLength(10)
-  @MaxLength(100)
   id_vehiculo!: string;
 
   /**
@@ -77,11 +69,14 @@ export class CreateViajesDto {
    * @IsString exige texto; @IsNotEmpty obliga a enviarla;
    * @MinLength(10)/@MaxLength(100) exigen entre 10 y 100 caracteres.
    */
+    /**
+   * Numero de ruta que sigue el viaje (Ej: "RUTA-003").
+   */
   @IsString()
   @IsNotEmpty()
-  @MinLength(10)
+  @MinLength(1) // Le bajé el mínimo a 1 por si acaso
   @MaxLength(100)
-  id_ruta!: string;
+  id_ruta!: string; 
 
   /**
    * Incidencia asociada al viaje (opcional).

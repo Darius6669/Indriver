@@ -11,7 +11,6 @@ import { UpdateViajesDto } from 'src/dtos/viajes/UpdateViajes.dto';
 import { ViajeUbicacionEntity } from 'src/entidades/ViajeUbicacion.entity';
 import { WebsocketService } from 'src/websocket/websocket.service';
 
-/** Vista plana de un viaje en curso: lo minimo que necesita el mapa. */
 export interface ViajeActivoDTO {
   id_viaje: number;
   fecha_inicio: Date;
@@ -22,19 +21,15 @@ export interface ViajeActivoDTO {
   ruta: { numero_ruta: string; nombre: string } | null;
 }
 
-/** Un bus que cae dentro del radio pedido, ya ordenado por cercanía. */
 export interface BusCercanoDTO {
   id_viaje: number;
   lat: number;
   lng: number;
   distancia_m: number;
-  /** true = hay socket conectado y la posicion viene del GPS al instante. */
   online: boolean;
-  /** true = las coordenadas vienen de memoria, no de la fila del viaje. */
   posicion_en_vivo: boolean;
   velocidad: number | null;
   rumbo: number | null;
-  /** Cuando se recibio ese punto por ultima vez. */
   ts_actualizacion: number;
   placa: string | null;
   numero_ruta: string | null;
@@ -42,107 +37,77 @@ export interface BusCercanoDTO {
   username: string | null;
 }
 
-/** Radio medio terrestre en metros. */
 const R_TIERRA_M = 6_371_000;
 
-/**
- * Servicio de viajes: CRUD + tracking + "buses cercanos".
- *
- * Concentra las consultas a 6 repositorios y una dependencia en memoria
- * (WebsocketService con las posiciones en vivo). Es la capa que impone las
- * invariantes de dominio:
- * - 1 viaje abierto (fecha_final IS NULL) por placa de vehiculo.
- * - La posicion del recorrido se guarda en viaje_ubicacion (UPSERT por
- *   id_viaje); la fila de `viaje` conserva el punto inicial en su lat/lng.
- */
 @Injectable()
 export class ViajesService {
   constructor(
-    /** Repositorio de viajes: entidad central del recorrido. */
     @InjectRepository(ViajesEntity)
     private viajesRepository: Repository<ViajesEntity>,
-    /** Repositorio de rutas: valida que el numero de ruta exista. */
     @InjectRepository(RutaEntity)
     private rutaRepository: Repository<RutaEntity>,
-    /** Repositorio de usuarios: valida que el conductor exista. */
     @InjectRepository(UsuariosEntity)
     private usuariosRepository: Repository<UsuariosEntity>,
-    /** Repositorio de vehiculos: valida que la placa exista. */
     @InjectRepository(VehiculosEntity)
     private vehiculosRepository: Repository<VehiculosEntity>,
-    /** Repositorio de incidencias: valida que el id de incidencia exista. */
     @InjectRepository(IncidenciasEntity)
     private IncidenciasRepository: Repository<IncidenciasEntity>,
-    /** Repositorio de posiciones: UNA fila por viaje, actualizada con UPSERT. */
     @InjectRepository(ViajeUbicacionEntity)
     private ubicacionesRepository: Repository<ViajeUbicacionEntity>,
-    // Solo para enriquecer con la posicion al instante y el flag `online`.
-    // Vive en memoria; la BD se refresca cada 30s.
     private readonly trackingService: WebsocketService,
   ) {}
 
-  /** Verifica que el numero de ruta indicado exista en la tabla ruta. */
-  async ValidarRuta(numero_ruta: string): Promise<boolean> {
-    const ruta = await this.rutaRepository.findOne({
-      where: { numero_ruta: numero_ruta },
-    });
-    if (ruta) {
-      return true;
-    }
-    return false;
-  }
-
-  /** Verifica que el conductor exista por su user_id. */
-  async ValidarUser(id_user: number): Promise<boolean> {
-    const user = await this.usuariosRepository.findOne({
-      where: { user_id: id_user },
-    });
-    if (user) {
-      return true;
-    }
-    return false;
-  }
-
-  /** Verifica que la placa del vehiculo exista en la tabla vehiculos. */
+  /**
+   * Verifica que la placa del vehiculo exista en la tabla vehiculos.
+   */
   async ValidarVehiculos(placa: string): Promise<boolean> {
     const vehiculo = await this.vehiculosRepository.findOne({
       where: { placa: placa },
     });
-    if (vehiculo) {
-      return true;
-    }
-    return false;
+    return !!vehiculo;
   }
 
-  /** Verifica que el id de incidencia exista en la tabla incidencias. */
+  /**
+   * Verifica que el id de incidencia exista en la tabla incidencias.
+   */
   async ValidarIncidencias(incidencias_id: number): Promise<boolean> {
     const incidencias = await this.IncidenciasRepository.findOne({
       where: { incidencias_id: incidencias_id },
     });
-    if (incidencias) {
-      return true;
-    }
-    return false;
+    return !!incidencias;
   }
 
-  /**
+    /** Busca la ruta por su numero_ruta y la devuelve (o null si no existe). */
+  async ValidarRuta(numero_ruta: string): Promise<RutaEntity | null> {
+    return await this.rutaRepository.findOne({
+      where: { numero_ruta: numero_ruta },
+    });
+  }
+
+  /** Busca al usuario por su username y lo devuelve (o null si no existe). */
+  async ValidarUser(username: string): Promise<UsuariosEntity | null> {
+    return await this.usuariosRepository.findOne({
+      where: { username: username },
+    });
+  }
+
+    /**
    * Crea un viaje tras validar sus referencias (ruta, usuario, vehiculo e
    * incidencia opcional). Si la placa ya tiene un viaje abierto, devuelve ESE
    * viaje en vez de duplicarlo: esa es la invariante "1 abierto por placa".
    */
   async CreateViajes(createViajesdto: CreateViajesDto): Promise<ViajesEntity> {
-    // Validar los campos obligatorios (ruta, usuario, vehículo)
-    const rutaValida = await this.ValidarRuta(createViajesdto.id_ruta);
-    const userValido = await this.ValidarUser(createViajesdto.id_user);
-    const vehiculoValido = await this.ValidarVehiculos(
-      createViajesdto.id_vehiculo,
-    );
+    // 1. Buscar las entidades completas usando los textos legibles
+    const rutaEncontrada = await this.ValidarRuta(createViajesdto.id_ruta);
+    const usuarioEncontrado = await this.ValidarUser(createViajesdto.username); // <-- Usamos username
+    const vehiculoValido = await this.ValidarVehiculos(createViajesdto.id_vehiculo);
 
-    if (!rutaValida || !userValido || !vehiculoValido) {
+    // 2. Validar que todo exista en la base de datos
+    if (!rutaEncontrada || !usuarioEncontrado || !vehiculoValido) {
       throw new NotFoundException('Ruta, usuario o vehículo no existen');
     }
 
-    // Validar incidencia solo si existe el campo y no es null/undefined
+    // 3. Validar incidencia solo si existe el campo y no es null/undefined
     if (
       createViajesdto.incidencia_id !== undefined &&
       createViajesdto.incidencia_id !== null
@@ -155,24 +120,26 @@ export class ViajesService {
       }
     }
 
-    // Un solo viaje ABIERTO por vehiculo (ver sql/003). Si ya hay uno, se
-    // devuelve ESE en vez de crear un duplicado: la app recibe el id_viaje
-    // estable y lo reutiliza en `viaje:start`.
+    // 4. Un solo viaje ABIERTO por vehiculo. Si ya hay uno, se devuelve ESE.
     const abierto = await this.buscarViajeAbierto(createViajesdto.id_vehiculo);
     if (abierto) return abierto;
 
+    // 5. Crear el viaje pasando los OBJETOS COMPLETOS (para que TypeORM sea feliz)
     const viaje = this.viajesRepository.create({
       fecha_inicio: createViajesdto.fecha_inicio,
       fecha_final: createViajesdto.fecha_final,
       lactitud: createViajesdto.lactitud,
       longitud: createViajesdto.longitud,
-      usuario: { user_id: createViajesdto.id_user },
+      
+      usuario: usuarioEncontrado, // <--- Objeto completo
       vehiculo: { placa: createViajesdto.id_vehiculo },
-      ruta: { numero_ruta: createViajesdto.id_ruta },
+      ruta: rutaEncontrada,       // <--- Objeto completo
+      
       incidencia: createViajesdto.incidencia_id
         ? { incidencias_id: createViajesdto.incidencia_id }
         : null,
     });
+
     try {
       const crear = await this.viajesRepository.save(viaje);
       return await this.ObtenerVijesId(crear.id_viaje);
@@ -188,11 +155,8 @@ export class ViajesService {
       throw error;
     }
   }
-
-  /** Viaje en curso (fecha_final NULL) del vehiculo. */
-  private async buscarViajeAbierto(
-    placa: string,
-  ): Promise<ViajesEntity | null> {
+  
+  private async buscarViajeAbierto(placa: string): Promise<ViajesEntity | null> {
     const abierto = await this.viajesRepository.findOne({
       where: { vehiculo: { placa }, fecha_final: IsNull() },
       relations: ['usuario', 'vehiculo', 'ruta', 'incidencia'],
@@ -201,7 +165,6 @@ export class ViajesService {
     return abierto ?? null;
   }
 
-  /** Detecta el unique_violation de Postgres (codigo 23505). */
   private esViolacionUnica(error: unknown): boolean {
     const codigo =
       (error as { code?: string })?.code ??
@@ -209,15 +172,10 @@ export class ViajesService {
     return codigo === '23505';
   }
 
-  /** Lista el historial completo de viajes. */
   async ObtenerViajes(): Promise<ViajesEntity[]> {
     return await this.viajesRepository.find();
   }
 
-  /**
-   * Devuelve un viaje por id con sus relaciones (usuario, vehiculo, ruta,
-   * incidencia) recortadas a los campos minimos que consume la vista.
-   */
   async ObtenerVijesId(id_viaje: number): Promise<ViajesEntity> {
     const viaje = await this.viajesRepository
       .createQueryBuilder('viaje')
@@ -248,18 +206,12 @@ export class ViajesService {
     return viaje;
   }
 
-  /** Elimina fisicamente el viaje del id indicado (si existe). */
   async EliminarViajeID(id_viaje: number): Promise<ViajesEntity> {
     return await this.viajesRepository.remove(
       await this.ObtenerVijesId(id_viaje),
     );
   }
 
-  /**
-   * Actualiza un viaje. Solo cambia los campos que llegan definidos en el dto;
-   * las referencias (usuario, vehiculo, ruta, incidencia) se reemplazan por su
-   * id cuando vienen indicadas.
-   */
   async ActualizarViaje(
     id_viaje: number,
     updateviajeDto: UpdateViajesDto,
@@ -271,25 +223,26 @@ export class ViajesService {
       viaje.lactitud = updateviajeDto.lactitud ?? viaje.lactitud;
       viaje.longitud = updateviajeDto.longitud ?? viaje.longitud;
 
+      // Si actualizan el usuario, buscamos por username (asumiendo que el UpdateDto también cambió a username)
       if (updateviajeDto.usuario !== undefined) {
-        viaje.usuario = { user_id: updateviajeDto.usuario } as UsuariosEntity;
+        const user = await this.usuariosRepository.findOne({ where: { username: updateviajeDto.usuario.toString() } });
+        if (user) viaje.usuario = user;
       }
 
       if (updateviajeDto.id_vehiculo !== undefined) {
-        viaje.vehiculo = {
-          placa: updateviajeDto.id_vehiculo,
-        } as VehiculosEntity;
+        viaje.vehiculo = { placa: updateviajeDto.id_vehiculo } as VehiculosEntity;
       }
 
+      // Si actualizan la ruta, buscamos por numero_ruta
       if (updateviajeDto.id_ruta !== undefined) {
-        viaje.ruta = { numero_ruta: updateviajeDto.id_ruta } as RutaEntity;
+        const ruta = await this.rutaRepository.findOne({ where: { numero_ruta: updateviajeDto.id_ruta } });
+        if (ruta) viaje.ruta = ruta;
       }
 
       if (updateviajeDto.incidencia_id !== undefined) {
-        viaje.incidencia = {
-          incidencias_id: updateviajeDto.incidencia_id,
-        } as IncidenciasEntity;
+        viaje.incidencia = { incidencias_id: updateviajeDto.incidencia_id } as IncidenciasEntity;
       }
+      
       const update = await this.viajesRepository.save(viaje);
       return await this.ObtenerVijesId(update.id_viaje);
     }
@@ -297,13 +250,9 @@ export class ViajesService {
   }
 
   // ==================================================================
-  //  TRACKING
+  //  TRACKING (Se mantiene igual)
   // ==================================================================
 
-  /**
-   * Viajes sin fecha_final. Se apoya en el indice parcial
-   * idx_viaje_activos del script sql/001.
-   */
   async ObtenerViajesActivos(): Promise<ViajeActivoDTO[]> {
     const viajes = await this.viajesRepository
       .createQueryBuilder('viaje')
@@ -329,22 +278,11 @@ export class ViajesService {
     }));
   }
 
-  /**
-   * Ultima posicion conocida. Sale de viaje_ubicacion (la fila unica por viaje,
-   * refrescada cada 30s por el socket), con la fila del viaje como respaldo.
-   */
   async ObtenerUltimaUbicacion(id_viaje: number) {
-    const viaje = await this.viajesRepository.findOne({
-      where: { id_viaje },
-    });
-    if (!viaje) {
-      throw new NotFoundException(`El viaje con id ${id_viaje} no existe.`);
-    }
-    // La posicion vive en viaje_ubicacion (una fila por viaje). Se cae a la
-    // fila del viaje solo si todavia no hay punto (viajes viejos / seed).
-    const ubicacion = await this.ubicacionesRepository.findOne({
-      where: { id_viaje },
-    });
+    const viaje = await this.viajesRepository.findOne({ where: { id_viaje } });
+    if (!viaje) throw new NotFoundException(`El viaje con id ${id_viaje} no existe.`);
+    
+    const ubicacion = await this.ubicacionesRepository.findOne({ where: { id_viaje } });
     return {
       id_viaje: viaje.id_viaje,
       lat: ubicacion?.lactitud ?? viaje.lactitud,
@@ -355,27 +293,16 @@ export class ViajesService {
     };
   }
 
-  /**
-   * Fila cruda de viaje_ubicacion (una por viaje). A diferencia de
-   * ObtenerUltimaUbicacion, expone velocidad/rumbo/precision/recorded_at.
-   * Si el viaje todavia no tiene punto, devuelve `ubicacion: null`.
-   */
   async ObtenerUbicacion(id_viaje: number) {
-    const viaje = await this.viajesRepository.findOne({
-      where: { id_viaje },
-    });
-    if (!viaje) {
-      throw new NotFoundException(`El viaje con id ${id_viaje} no existe.`);
-    }
-    const ubicacion = await this.ubicacionesRepository.findOne({
-      where: { id_viaje },
-    });
+    const viaje = await this.viajesRepository.findOne({ where: { id_viaje } });
+    if (!viaje) throw new NotFoundException(`El viaje con id ${id_viaje} no existe.`);
+    
+    const ubicacion = await this.ubicacionesRepository.findOne({ where: { id_viaje } });
     return {
       id_viaje,
       en_curso: viaje.fecha_final === null,
       existe_ubicacion: ubicacion !== null,
-      ubicacion: ubicacion
-        ? {
+      ubicacion: ubicacion ? {
             id: ubicacion.id,
             lactitud: ubicacion.lactitud,
             longitud: ubicacion.longitud,
@@ -383,22 +310,13 @@ export class ViajesService {
             rumbo: ubicacion.rumbo ?? null,
             precision: ubicacion.precision ?? null,
             recorded_at: ubicacion.recorded_at,
-          }
-        : null,
+          } : null,
     };
   }
 
-  /**
-   * Traza del recorrido para dibujar la polilinea. Sale de viaje_ubicacion,
-   * no de la fila del viaje.
-   */
   async ObtenerRecorrido(id_viaje: number, horas = 6) {
-    const existe = await this.viajesRepository.findOne({
-      where: { id_viaje },
-    });
-    if (!existe) {
-      throw new NotFoundException(`El viaje con id ${id_viaje} no existe.`);
-    }
+    const existe = await this.viajesRepository.findOne({ where: { id_viaje } });
+    if (!existe) throw new NotFoundException(`El viaje con id ${id_viaje} no existe.`);
 
     const desde = new Date(Date.now() - horas * 60 * 60 * 1000);
     const puntos = await this.ubicacionesRepository
@@ -422,16 +340,7 @@ export class ViajesService {
     };
   }
 
-  /**
-   * Fallback por REST cuando el socket esta caido (movil sin datos, bateria
-   * plana). El socket sigue siendo la via principal.
-   */
-  async RegistrarUbicacionManual(
-    id_viaje: number,
-    lactitud: number,
-    longitud: number,
-  ) {
-    // UPSERT: viaje_ubicacion tiene una sola fila por viaje.
+  async RegistrarUbicacionManual(id_viaje: number, lactitud: number, longitud: number) {
     await this.ubicacionesRepository.upsert(
       { id_viaje, lactitud, longitud, recorded_at: new Date() },
       ['id_viaje'],
@@ -439,48 +348,16 @@ export class ViajesService {
     return await this.ObtenerUltimaUbicacion(id_viaje);
   }
 
-  // ==================================================================
-  //  BUSES CERCANOS
-  // ==================================================================
-
-  /**
-   * "Buses cerca de mi": viajes en curso dentro de un radio, de mas cerca a mas
-   * lejos.
-   *
-   * Son dos fuentes de verdad y hay que mezclarlas bien:
-   *
-   *  1. La BD (WHERE fecha_final IS NULL) es la fuente que sobrevive a un
-   *     reinicio, asi que es la base. Pero su posicion esta hasta 30s atrasada.
-   *  2. La memoria del socket tiene la posicion al instante y el estado
-   *     real de conexion, pero solo conoce los viajes de ESTE proceso.
-   *
-   * Por eso: la BD acota el terreno, y despues cada fila se corrige con la
-   * posicion en vivo si la hay, y se vuelve a medir y a ordenar.
-   */
   async ObtenerViajesCercanos(
-    lactitud: number,
-    longitud: number,
-    radioM = 1000,
-    limite = 20,
-    soloOnline = false,
+    lactitud: number, longitud: number, radioM = 1000, limite = 20, soloOnline = false,
   ): Promise<BusCercanoDTO[]> {
     const radio = Math.min(50_000, Math.max(50, radioM));
     const max = Math.min(100, Math.max(1, limite));
 
-    // Caja envolvente: antes de calcular haversine se descartan los puntos que
-    // ni por musica pueden estar. Sin esto Postgres recorre TODOS los viajes
-    // activos por cada consulta. Es un filtro rectangular, no exacto; la
-    // precision la pone el haversine de abajo.
     const dLat = radio / 111_320;
     const cos = Math.cos((lactitud * Math.PI) / 180);
-    // En los polos el coseno tiende a 0 y la division explota: se topa en 1 grado.
     const dLng = radio / (111_320 * Math.max(Math.abs(cos), 0.0175));
 
-    // Se piden mas filas de las que se van a devolver porque el ajuste con la
-    // posicion en vivo puede sacar a alguien del radio, y ese hueco no se
-    // rellena con una segunda vuelta a la BD.
-    // La posicion sale de viaje_ubicacion (una fila por viaje); si un viaje
-    // todavia no tiene punto (seed / recien creado) se cae a viaje.lactitud.
     const candidatos = await this.viajesRepository
       .createQueryBuilder('viaje')
       .leftJoin('viaje.usuario', 'usuario')
@@ -515,13 +392,11 @@ export class ViajesService {
       }>();
 
     const vivos = this.trackingService.posicionesVivas();
-
     const cerca: BusCercanoDTO[] = [];
+
     for (const c of candidatos) {
       const idViaje = Number(c.id_viaje);
       const vivo = vivos.get(idViaje);
-      // Si hay sesion en memoria, manda su posicion: la de la fila tiene hasta
-      // 30s de retraso y para "cercano" eso ya es otra calle.
       const lat = vivo?.ultima_ubicacion.lat ?? Number(c.lat);
       const lng = vivo?.ultima_ubicacion.lng ?? Number(c.lng);
       const enVivo = vivo !== undefined;
@@ -552,13 +427,7 @@ export class ViajesService {
     return cerca.slice(0, max);
   }
 
-  /** Distancia en metros entre dos puntos. Haversine, no Euclidea. */
-  private distanciaMetros(
-    lat1: number,
-    lng1: number,
-    lat2: number,
-    lng2: number,
-  ): number {
+  private distanciaMetros(lat1: number, lng1: number, lat2: number, lng2: number): number {
     const rad = (d: number) => (d * Math.PI) / 180;
     const dLat = rad(lat2 - lat1);
     const dLng = rad(lng2 - lng1);
