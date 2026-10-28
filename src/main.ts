@@ -1,5 +1,5 @@
-import { NestFactory } from '@nestjs/core';
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { NestFactory, Reflector } from '@nestjs/core';
+import { ClassSerializerInterceptor, Logger, ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 
 /**
@@ -10,7 +10,7 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   // Instancia la aplicación (carga config, conexión a BD y todos los módulos).
   const app = await NestFactory.create(AppModule);
-
+  app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
   // Sin esto los @IsNumber()/@IsNotEmpty() de los DTO no se validan nunca
   app.useGlobalPipes(
     new ValidationPipe({

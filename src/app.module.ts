@@ -14,6 +14,7 @@ import { IncidenciasModule } from './incidencias/incidencias.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
 import { AuthModule } from './auth/auth.module';
 import { RolesModule } from './Roles/roles.module';
+import { LicenciasModule } from './licencias/licencias.module';
 /**
  * Módulo raíz de la aplicación.
  * Carga las variables de entorno, establece la conexión a PostgreSQL con
@@ -50,6 +51,7 @@ import { RolesModule } from './Roles/roles.module';
     UsuariosModule,
     AuthModule,
     RolesModule,
+    LicenciasModule,
   ],
   controllers: [AppController],
   providers: [AppService],

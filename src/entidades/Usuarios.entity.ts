@@ -11,6 +11,8 @@ import { IsNotEmpty } from 'class-validator';
 import { ViajesEntity } from './Viajes.entity';
 import { PersonaEntity } from './persona.entity';
 import { CooperativaEntity } from './cooperativa.entity';
+import { LicenciaEntity } from './Licencia.entity';
+import { Exclude } from 'class-transformer';
 
 /**
  * Cuenta de acceso al sistema (credenciales + rol).
@@ -25,21 +27,18 @@ export class UsuariosEntity {
   user_id!: number;
 
   /** Nombre de usuario para login (columna `username`, max 50 caracteres). */
-  @Column({ type: 'varchar', length: 50 })
-  @IsNotEmpty()
+  @Column()
   username!: string;
 
-  /** Contrasena (columna `contrasena`, max 50 caracteres; almacenar hasheada). */
-  @Column({ type: 'varchar', length: 50 })
-  @IsNotEmpty()
+  @Column()
+  @Exclude() //
   contrasena!: string;
 
-  /** Estado activo/inactivo de la cuenta (columna `status`, boolean, por defecto false). */
-  @Column({ type: 'boolean', default: false })
+  @Column()
   status!: boolean;
 
-  /** Rol del usuario (columna `rol`, max 50 caracteres; ej. conductor, admin). */
-  @Column({ type: 'varchar', length: 50 })
+  @Column()
+  @Exclude() //
   rol!: string;
 
   /**
@@ -64,4 +63,10 @@ export class UsuariosEntity {
   @ManyToOne(() => CooperativaEntity, (cooperativa) => cooperativa.usuarios)
   @JoinColumn({ name: 'cooperativa_id' })
   cooperativa!: CooperativaEntity;
+
+  /**
+   * Relacion 1:N con `LicenciaEntity`: licencias que posee este usuario.
+   */
+  @OneToMany(() => LicenciaEntity, (licencia) => licencia.usuario)
+  licencias!: LicenciaEntity[];
 }
