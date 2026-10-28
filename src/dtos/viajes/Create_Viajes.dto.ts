@@ -3,9 +3,8 @@ import {
   IsNotEmpty,
   MinLength,
   MaxLength,
-  IsInt,
   IsOptional,
-  IsDate,
+  IsDateString,
   IsNumber,
 } from 'class-validator';
 
@@ -16,24 +15,20 @@ export class CreateViajesDto {
 
   /**
    * Fecha/hora de inicio del viaje.
-   * @IsDate exige una fecha valida y @IsNotEmpty obliga a enviarla.
    */
-  @IsDate()
+  @IsDateString()
   @IsNotEmpty()
-  fecha_inicio!: Date;
+  fecha_inicio!: string;
 
   /**
    * Fecha/hora de finalizacion del viaje.
-   * @IsDate exige fecha valida; @IsOptional permite omitirla (viaje aun en
-   * curso).
    */
-  @IsDate()
+  @IsDateString()
   @IsOptional()
-  fecha_final!: Date;
+  fecha_final?: string;
 
   /**
    * Latitud inicial del viaje.
-   * @IsNumber exige numero y @IsNotEmpty obliga a enviarla.
    */
   @IsNumber()
   @IsNotEmpty()
@@ -41,50 +36,38 @@ export class CreateViajesDto {
 
   /**
    * Longitud inicial del viaje.
-   * @IsNumber exige numero y @IsNotEmpty obliga a enviarla.
    */
   @IsNumber()
   @IsNotEmpty()
   longitud!: number;
 
   /**
-   * Usuario (conductor) que realiza el viaje.
-   * @IsNumber exige numero y @IsNotEmpty obliga a enviarlo.
+   * Username del conductor que realiza el viaje.
    */
-   @IsString()
-   @IsNotEmpty()
-   username!: string;
+  @IsString()
+  @IsNotEmpty()
+  username!: string;
 
   /**
    * Vehiculo asignado al viaje.
-   * @IsString exige texto; @IsNotEmpty obliga a enviarlo;
-   * @MinLength(10)/@MaxLength(100) exigen entre 10 y 100 caracteres.
    */
   @IsString()
   @IsNotEmpty()
   id_vehiculo!: string;
 
   /**
-   * Ruta que sigue el viaje.
-   * @IsString exige texto; @IsNotEmpty obliga a enviarla;
-   * @MinLength(10)/@MaxLength(100) exigen entre 10 y 100 caracteres.
-   */
-    /**
    * Numero de ruta que sigue el viaje (Ej: "RUTA-003").
    */
   @IsString()
   @IsNotEmpty()
-  @MinLength(1) // Le bajé el mínimo a 1 por si acaso
+  @MinLength(1)
   @MaxLength(100)
-  id_ruta!: string; 
+  id_ruta!: string;
 
   /**
    * Incidencia asociada al viaje (opcional).
-   * @IsNumber exige numero; @IsNotEmpty y @IsOptional permiten omitirla o
-   * enviarla nula.
    */
   @IsNumber()
-  @IsNotEmpty()
   @IsOptional()
   incidencia_id?: number | null;
 }

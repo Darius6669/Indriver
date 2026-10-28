@@ -12,7 +12,7 @@ export class CreateVehiculosDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  placa: string;
+  placa!: string;
 
   /**
    * Modelo del vehiculo.
@@ -22,7 +22,7 @@ export class CreateVehiculosDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  modelo: string;
+  modelo!: string;
 
   /**
    * Color del vehiculo.
@@ -32,7 +32,7 @@ export class CreateVehiculosDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  color: string;
+  color!: string;
 
   /**
    * Ano de fabricacion del vehiculo.
@@ -42,7 +42,7 @@ export class CreateVehiculosDto {
   //@IsDateString({}, { message: 'La fecha debe tener un formato válido (Ej: 2020-05-15)' })
   @IsNotEmpty()
   // @ts-ignore  <--- ESTA LÍNEA ES LA MAGIA
-  anofabricacion: Date; 
+  anofabricacion!: Date; 
 
   /**
    * Cooperativa a la que pertenece el vehiculo.
@@ -52,5 +52,5 @@ export class CreateVehiculosDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  cooperativa_id: string;
+  cooperativa_id!: string;
 }
