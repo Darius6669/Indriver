@@ -538,19 +538,38 @@ export class WebsocketService implements OnModuleDestroy {
     await this.persistirUbicacion(sesion);
   }
 
-  /**
+ /**
    * Fuga de memoria: si el chofer cierra la app a la fuerza y nunca vuelve, su
    * sesion se queda en el Map para siempre. Un viaje de mas de MAX_SESION_HORAS
    * abierto es un bug del cliente, no un caso legitimo.
+   *
+   * IMPORTANTE: Al descartar la sesion, tambien cerramos el viaje en la BD
+   * para que el vehiculo no quede bloqueado con un viaje "zombi".
    */
-  private reaper() {
+  private async reaper() {
     const limite = Date.now() - MAX_SESION_HORAS * 60 * 60 * 1000;
     for (const [idViaje, sesion] of [...this.sesiones]) {
       if (sesion.fechaInicio.getTime() > limite) continue;
       if (sesion.online) continue; // online: es un viaje largo de verdad
+      
       this.logger.warn(
         `Sesion ${idViaje} de ${sesion.username} lleva mas de ${MAX_SESION_HORAS}h offline, se descarta`,
       );
+
+      // 1. Cerramos el viaje en la base de datos (fecha_final = ultima conexion)
+      try {
+        await this.viajesRepository.update(
+          { id_viaje: idViaje },
+          { fecha_final: new Date(sesion.lastSeen) }
+        );
+        this.logger.log(`Viaje zombi ${idViaje} cerrado en BD por inactividad.`);
+      } catch (error) {
+        this.logger.error(
+          `No se pudo cerrar el viaje zombi ${idViaje} en BD: ${(error as Error).message}`
+        );
+      }
+
+      // 2. Lo eliminamos de la memoria y avisamos a las rooms
       this.eliminar(idViaje);
       this.server?.to(roomRuta(sesion.numeroRuta)).emit('viaje:descartado', {
         id_viaje: idViaje,
@@ -806,5 +825,22 @@ export class WebsocketService implements OnModuleDestroy {
         ),
       ),
     );
+  }
+
+   /**
+   * Fuerza la eliminación de una sesión de la memoria.
+   * Lo usa el REST cuando un Admin cierra un viaje "zombi" desde el panel.
+   */
+  forzarCierreEnMemoria(idViaje: number) {
+    const sesion = this.sesiones.get(idViaje);
+    if (!sesion) return; // Si no estaba en memoria, no hay nada que limpiar
+
+    // Avisamos a las salas que el viaje murió
+    this.server?.to(roomViaje(idViaje)).emit('viaje:finalizado', { id_viaje: idViaje });
+    this.server?.to(roomRuta(sesion.numeroRuta)).emit('viaje:cerrado', { id_viaje: idViaje });
+    
+    // Lo borramos del mapa en memoria
+    this.eliminar(idViaje);
+    this.logger.log(`Viaje ${idViaje} forzado a cerrar desde el REST.`);
   }
 }

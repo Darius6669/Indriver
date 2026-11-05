@@ -479,4 +479,22 @@ export class ViajesService {
 
     return viaje;
   }
+
+  /** Fuerza el cierre de un viaje atascado (solo para Admins). */
+  async ForzarCierreViaje(id_viaje: number): Promise<ViajesEntity> {
+    const viaje = await this.ObtenerVijesId(id_viaje);
+    
+    if (viaje.fecha_final !== null) {
+      throw new ConflictException('Este viaje ya está finalizado.');
+    }
+
+    // Lo cerramos en la BD con la hora actual
+    viaje.fecha_final = new Date();
+    await this.viajesRepository.save(viaje);
+
+    // (Opcional) Si el socket está vivo, avisamos para que lo saque del mapa
+    this.trackingService.forzarCierreEnMemoria(id_viaje);
+
+    return viaje;
+  }
 }

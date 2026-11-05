@@ -10,12 +10,16 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ViajesService } from './viajes.service';
 import { RegistrarUbicacionDto } from 'src/dtos/viajes/RegistrarUbicacion.dto';
 import { BuscarCercanosDto } from 'src/dtos/viajes/BuscarCercanos.dto';
 import { CreateViajesDto } from 'src/dtos/viajes/Create_Viajes.dto';
 import { UpdateViajesDto } from 'src/dtos/viajes/UpdateViajes.dto';
+import { Roles } from 'src/Roles/roles.decorador';
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { RolesGuard } from 'src/Roles/roles.guard';
 
 /**
  * API REST de viajes y de su tracking.
@@ -31,6 +35,8 @@ import { UpdateViajesDto } from 'src/dtos/viajes/UpdateViajes.dto';
  * - Solo puede existir 1 viaje abierto (fecha_final IS NULL) por placa.
  */
 @Controller('viajes')
+@UseGuards(JwtAuthGuard, RolesGuard) // Aplica autenticación y autorización a todas las rutas
+@Roles(['Admin', 'Superadmin', 'Conductor'])
 export class ViajesController {
   /** Inyeccion del servicio que concentra la logica de negocio de viajes. */
   constructor(private readonly viajesService: ViajesService) {}
@@ -207,6 +213,18 @@ export class ViajesController {
     const viaje = await this.viajesService.ObtenerViajeActivoPorUsername(username);
     return {
       message: `Viaje activo encontrado para el conductor ${username}`,
+      control: viaje,
+    };
+  }
+
+   /** Fuerza el cierre de un viaje (Solo para administradores). */
+  @Patch('/Forzar-Cierre/:id') // Usamos Patch porque estamos modificando algo
+  @Roles(['Admin'])
+  @HttpCode(HttpStatus.OK)
+  async Forzar_Cierre(@Param('id', ParseIntPipe) id: number) {
+    const viaje = await this.viajesService.ForzarCierreViaje(id);
+    return {
+      message: `El viaje ${id} ha sido cerrado forzosamente correctamente`,
       control: viaje,
     };
   }
