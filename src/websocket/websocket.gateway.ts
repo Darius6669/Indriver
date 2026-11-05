@@ -74,7 +74,7 @@ export class WebsocketGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
   /** Referencia al server de socket.io (la setea NestJS al arrancar). */
-  @WebSocketServer() server: Server;
+  @WebSocketServer() server?: Server;
 
   /** Logger con nombre propio para rastrear los eventos en consola. */
   private readonly logger = new Logger('WebsocketGateway');

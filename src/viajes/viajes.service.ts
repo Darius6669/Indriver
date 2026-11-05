@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { IncidenciasEntity } from 'src/entidades/Incidencias.entity';
@@ -121,9 +121,13 @@ export class ViajesService {
     }
 
     // 4. Un solo viaje ABIERTO por vehiculo. Si ya hay uno, se devuelve ESE.
-    const abierto = await this.buscarViajeAbierto(createViajesdto.id_vehiculo);
-    if (abierto) return abierto;
-
+     const abierto = await this.buscarViajeAbierto(createViajesdto.id_vehiculo);
+    if (abierto) {
+      // Lanzamos un error 409 (Conflict) para que el frontend sepa que ya hay un viaje
+      throw new ConflictException(
+        `El vehículo con placa ${createViajesdto.id_vehiculo} ya tiene un viaje activo (ID: ${abierto.id_viaje}). Debe finalizarlo antes de iniciar otro.`,
+      );
+    }
     // 5. Crear el viaje pasando los OBJETOS COMPLETOS (para que TypeORM sea feliz)
     const viaje = this.viajesRepository.create({
       fecha_inicio: createViajesdto.fecha_inicio,
@@ -435,5 +439,44 @@ export class ViajesService {
       Math.sin(dLat / 2) ** 2 +
       Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
     return 2 * R_TIERRA_M * Math.asin(Math.min(1, Math.sqrt(a)));
+  }
+
+  async ObtenerViajeActivoPorUsername(username: string): Promise<any> {
+    const viaje = await this.viajesRepository
+      .createQueryBuilder('viaje')
+      .leftJoin('viaje.usuario', 'usuario')
+      .leftJoin('viaje.vehiculo', 'vehiculo')
+      .leftJoin('viaje.ruta', 'ruta')
+      .leftJoin('viaje.incidencia', 'incidencia')
+      .select([
+        'viaje.id_viaje',
+        'viaje.fecha_inicio',
+        'viaje.fecha_final',
+        'viaje.lactitud',
+        'viaje.longitud',
+        'usuario.username',
+        'usuario.status',
+        'vehiculo.placa',
+        'vehiculo.modelo',
+        'vehiculo.color',
+        'vehiculo.anofabricacion',
+        'ruta.numero_ruta',
+        'ruta.nombre',
+        'ruta.descripcion',
+        'ruta.tarifa',
+        'incidencia.descripcion',
+      ])
+      .where('usuario.username = :username', { username })
+      .andWhere('viaje.fecha_final IS NULL')
+      .orderBy('viaje.id_viaje', 'DESC')
+      .getOne();
+
+    if (!viaje) {
+      throw new NotFoundException(
+        `El conductor ${username} no tiene ningún viaje activo en este momento.`,
+      );
+    }
+
+    return viaje;
   }
 }

@@ -200,4 +200,14 @@ export class ViajesController {
       control: ubicacion,
     };
   }
+
+  @Get('/Obtener-viaje-activo/:username')
+  @HttpCode(HttpStatus.OK)
+  async Obtener_Viaje_Activo(@Param('username') username: string) {
+    const viaje = await this.viajesService.ObtenerViajeActivoPorUsername(username);
+    return {
+      message: `Viaje activo encontrado para el conductor ${username}`,
+      control: viaje,
+    };
+  }
 }
