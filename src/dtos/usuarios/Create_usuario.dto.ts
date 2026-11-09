@@ -16,9 +16,6 @@ export class CreateUsuarioDTO {
    * Identificador del usuario.
    * @IsInt exige entero y @IsNotEmpty obliga a enviarlo.
    */
-  @IsInt()
-  @IsNotEmpty()
-  id_usuario!: number;
 
   /**
    * Nombre de usuario para iniciar sesion.
