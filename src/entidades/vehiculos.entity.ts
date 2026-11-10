@@ -9,6 +9,7 @@ import {
 import { IsNotEmpty } from 'class-validator';
 import { CooperativaEntity } from './cooperativa.entity';
 import { ViajesEntity } from './Viajes.entity';
+import { AsignacionEntity } from './asignaciones.entity';
 
 /**
  * Vehiculo (unidad) de la flota de una cooperativa.
@@ -52,4 +53,7 @@ export class VehiculosEntity {
    */
   @OneToMany(() => ViajesEntity, (viaje) => viaje.vehiculo)
   viajes!: ViajesEntity[];
+
+  @OneToMany(() => AsignacionEntity, (asignacion) => asignacion.vehiculo)
+  asignaciones!: AsignacionEntity[];
 }

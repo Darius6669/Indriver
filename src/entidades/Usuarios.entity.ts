@@ -13,6 +13,7 @@ import { PersonaEntity } from './persona.entity';
 import { CooperativaEntity } from './cooperativa.entity';
 import { LicenciaEntity } from './Licencia.entity';
 import { Exclude } from 'class-transformer';
+import { AsignacionEntity } from './asignaciones.entity';
 
 /**
  * Cuenta de acceso al sistema (credenciales + rol).
@@ -69,4 +70,7 @@ export class UsuariosEntity {
    */
   @OneToMany(() => LicenciaEntity, (licencia) => licencia.usuario)
   licencias!: LicenciaEntity[];
+
+  @OneToMany(() => AsignacionEntity, (asignacion) => asignacion.usuario)
+  asignaciones!: AsignacionEntity[];
 }

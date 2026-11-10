@@ -12,6 +12,7 @@ import { RutaEntity } from './ruta.entity';
 import { IncidenciasEntity } from './Incidencias.entity';
 import { UsuariosEntity } from './Usuarios.entity';
 import { ViajeUbicacionEntity } from './ViajeUbicacion.entity';
+import { AsignacionEntity } from './asignaciones.entity';
 
 /**
  * Viaje: ejecucion concreta de una ruta por un conductor con un vehiculo.
@@ -90,4 +91,7 @@ export class ViajesEntity {
    */
   @OneToMany(() => ViajeUbicacionEntity, (ubicacion) => ubicacion.viaje)
   ubicaciones!: ViajeUbicacionEntity[];
+
+  @OneToMany(() => AsignacionEntity, (asignacion) => asignacion.viaje)
+  asignaciones!: AsignacionEntity[];
 }
