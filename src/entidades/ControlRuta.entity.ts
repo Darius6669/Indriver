@@ -1,6 +1,7 @@
 import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 import { IsNotEmpty } from 'class-validator';
 import { RutaEntity } from './ruta.entity';
+import { RutaParadaEntity } from './ruta-parada.entity';
 
 /**
  * Punto de control / parada que sirve como origen de una o varias rutas.
@@ -45,4 +46,7 @@ export class ControlRutaEntity {
    */
   @OneToMany(() => RutaEntity, (ruta) => ruta.origen)
   rutaOrigen!: RutaEntity[];
+
+  @OneToMany(() => RutaParadaEntity, (parada) => parada.control)
+  rutaParadas!: RutaParadaEntity[];
 }

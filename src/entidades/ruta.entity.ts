@@ -11,6 +11,7 @@ import { CooperativaEntity } from './cooperativa.entity';
 import { ControlRutaEntity } from './ControlRuta.entity';
 import { ViajesEntity } from './Viajes.entity';
 import { AsignacionEntity } from './asignaciones.entity';
+import { RutaParadaEntity } from './ruta-parada.entity';
 
 /**
  * Ruta de transporte ofrecida por una cooperativa.
@@ -69,4 +70,7 @@ export class RutaEntity {
 
   @OneToMany(() => AsignacionEntity, (asignacion) => asignacion.ruta)
   asignaciones!: AsignacionEntity[];
+
+  @OneToMany(() => RutaParadaEntity, (parada) => parada.ruta)
+  paradas!: RutaParadaEntity[];
 }
