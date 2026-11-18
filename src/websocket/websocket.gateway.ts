@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Logger,
   NotFoundException,
@@ -42,7 +43,7 @@ type Ack = (response: unknown) => void;
 /** Cualquiera autenticado puede ver; solo el Conductor puede mover un bus. */
 const ROL_QUE_PUBLICA = 'Conductor';
 
-/** Identidad verificada del socket: toda la politca de acceso sale de aqui. */
+/** Identidad verificada del socket: toda la politica de acceso sale de aqui. */
 interface ConductorConectado {
   userId: number;
   username: string;
@@ -67,7 +68,10 @@ interface Limite {
  * eventos por socket. La logica de negocio esta en WebsocketService.
  */
 @WebSocketGateway({
-  cors: { origin: '*', methods: ['GET', 'POST'], credentials: true },
+  // FIX #4: sin `credentials: true`. La spec de CORS prohibe `credentials`
+  // con `origin: '*'` y los navegadores descartan la conexion. El token viaja
+  // en handshake.auth, no en cookies, asi que no hace falta credentials.
+  cors: { origin: '*', methods: ['GET', 'POST'] },
   transports: ['websocket', 'polling'],
 })
 export class WebsocketGateway
@@ -84,6 +88,7 @@ export class WebsocketGateway
 
   /** socketId -> cubo de tokens del rate limit. */
   private readonly limites = new Map<string, Limite>();
+
   constructor(
     /** Servicio de tracking en memoria (sesiones, broadcast, persistencia). */
     private readonly trackingService: WebsocketService,
@@ -191,14 +196,24 @@ export class WebsocketGateway
       return null;
     }
 
+    // FIX #3: validar que el JWT traiga un username string no vacio ANTES de
+    // tocar la BD. Sin esto, un token sin username haria
+    // findOne({ where: { username: undefined } }), que NO filtra por nada y
+    // devuelve el PRIMER usuario de la tabla (podria ser un Admin).
+    if (typeof payload.username !== 'string' || payload.username.length === 0) {
+      this.rechazar(
+        client,
+        'token_invalido',
+        'El token no contiene un username valido.',
+      );
+      return null;
+    }
+
     // El rol NO se valida aqui: un supervisor o un pasajero con cuenta tambien
     // tiene derecho a ver el mapa. Lo que exige rol Conductor es publicar
     // posiciones, y eso se comprueba en cada evento de escritura.
-
-    // El JWT solo lleva el username: se confirma que la cuenta siga viva. El
-    // token de un conductor dado de baja no debe poder mover un bus.
     const usuario = await this.usuariosRepository.findOne({
-      where: { username: payload.username as string },
+      where: { username: payload.username },
     });
     if (!usuario) {
       this.rechazar(client, 'usuario_no_existe', 'El usuario ya no existe.');
@@ -224,35 +239,31 @@ export class WebsocketGateway
   private rechazar(client: Socket, code: string, mensaje: string) {
     this.logger.warn(`Conexion rechazada [${code}] desde ${client.id}`);
     client.emit('error:no_autorizado', { code, message: mensaje });
-    // Small delay so the error frame actually flushes before the close.
-    setTimeout(() => client.disconnect(true), 50);
+    // FIX #7: try/catch por si el socket ya se cerro antes del delay (el movil
+    // pudo desconectarse en esos 50ms). disconnect(true) sobre un socket
+    // muerto puede lanzar.
+    setTimeout(() => {
+      try {
+        client.disconnect(true);
+      } catch {
+        /* el socket ya estaba cerrado */
+      }
+    }, 50);
   }
 
   // ==================================================================
   //  EVENTOS
   // ==================================================================
 
-  /**
-   * Registra todos los handlers del socket. Cada handler arranca con
-   * `esperarIdentidad` para no perder eventos que llegan antes de terminar la
-   * verificacion, y los de escritura cortan con `exigirConductor` a los roles
-   * que solo pueden mirar.
-   */
   private registrarHandlers(
     client: Socket,
     identidadP: Promise<ConductorConectado | null>,
   ) {
-    /**
-     * Espera a que la verificacion termine. Cada handler arranca con esto, y
-     * con esto solo, se garantiza que ningun evento se pierda por llegar antes
-     * de tiempo ni que un socket rechazado ejecute logica de negocio.
-     */
     const esperarIdentidad = async (
       ack?: Ack,
     ): Promise<ConductorConectado | null> => {
       const identidad = await identidadP;
       if (identidad) return identidad;
-      // El socket ya va a cerrarse; el ack evita que el cliente cuelgue.
       ack?.({
         ok: false,
         code: 'no_autorizado',
@@ -261,7 +272,6 @@ export class WebsocketGateway
       return null;
     };
 
-    /** Corta a quien no puede mover un bus (supervisor, observador, etc). */
     const exigirConductor = (
       identidad: ConductorConectado,
       ack?: Ack,
@@ -276,11 +286,24 @@ export class WebsocketGateway
       return false;
     };
 
+    // FIX #1: helper unico para cortar por rate limit. Devuelve true si ya
+    // se corto (y ya se mando el ack), false si puede seguir.
+    const cortarPorRate = (ack?: Ack): boolean => {
+      if (this.permitirEvento(client)) return false;
+      ack?.({
+        ok: false,
+        code: 'rate_limit',
+        message: 'Demasiados eventos. Baja la frecuencia.',
+      });
+      return true;
+    };
+
     // ---- El conductor abre un viaje ----
     client.on('viaje:start', async (raw: unknown, ack?: Ack) => {
       const identidad = await esperarIdentidad(ack);
       if (!identidad) return;
       if (!exigirConductor(identidad, ack)) return;
+      if (cortarPorRate(ack)) return;
 
       const dto = this.validar(IniciarViajeWsDto, raw, client);
       if (!dto) return ack?.({ ok: false, code: 'validacion' });
@@ -316,15 +339,7 @@ export class WebsocketGateway
       if (!identidad) return;
       if (!exigirConductor(identidad, ack)) return;
 
-      if (!this.permitirEvento(client)) {
-        // Un cliente con un bug puede mandar miles por segundo y tumbar la
-        // instancia entera. Se corta sin desconectar para no perder el viaje.
-        return ack?.({
-          ok: false,
-          code: 'rate_limit',
-          message: 'Demasiados eventos. Baja la frecuencia del GPS.',
-        });
-      }
+      if (cortarPorRate(ack)) return;
 
       const dto = this.validar(UbicacionWsDto, raw, client);
       if (!dto) return ack?.({ ok: false, code: 'validacion' });
@@ -354,6 +369,7 @@ export class WebsocketGateway
       const identidad = await esperarIdentidad(ack);
       if (!identidad) return;
       if (!exigirConductor(identidad, ack)) return;
+      if (cortarPorRate(ack)) return;
 
       const dto = this.validar(ReconectarViajeWsDto, raw, client);
       if (!dto) return ack?.({ ok: false, code: 'validacion' });
@@ -387,6 +403,7 @@ export class WebsocketGateway
       const identidad = await esperarIdentidad(ack);
       if (!identidad) return;
       if (!exigirConductor(identidad, ack)) return;
+      if (cortarPorRate(ack)) return;
 
       const dto = this.validar(CerrarViajeWsDto, raw ?? {}, client);
       if (!dto) return ack?.({ ok: false, code: 'validacion' });
@@ -418,8 +435,6 @@ export class WebsocketGateway
       }
     };
 
-    // Pausa y finalizacion comparten todo el flujo, solo cambian en el DTO y
-    // en la semantica: pausa deja el viaje abierto en BD igual.
     client.on('viaje:pausa', cerrar);
     client.on('viaje:finalizar', cerrar);
 
@@ -427,6 +442,7 @@ export class WebsocketGateway
     client.on('suscribir:ruta', async (raw: unknown, ack?: Ack) => {
       const identidad = await esperarIdentidad(ack);
       if (!identidad) return;
+      if (cortarPorRate(ack)) return;
 
       const dto = this.validar(SuscribirRutaWsDto, raw, client);
       if (!dto) return ack?.({ ok: false, code: 'validacion' });
@@ -444,6 +460,7 @@ export class WebsocketGateway
 
     client.on('desuscribir:ruta', async (raw: unknown, ack?: Ack) => {
       if (!(await esperarIdentidad(ack))) return;
+      if (cortarPorRate(ack)) return;
       const dto = this.validar(SuscribirRutaWsDto, raw, client);
       if (!dto) return ack?.({ ok: false, code: 'validacion' });
       await client.leave(roomRuta(dto.numero_ruta));
@@ -452,11 +469,17 @@ export class WebsocketGateway
 
     client.on('viajes:activos', async (_raw: unknown, ack?: Ack) => {
       if (!(await esperarIdentidad(ack))) return;
+      // FIX #1: snapshotTodos() serializa TODO el mapa. Sin rate limit, un
+      // movil en loop te tumba el server.
+      if (cortarPorRate(ack)) return;
       ack?.({ ok: true, ...this.trackingService.snapshotTodos() });
     });
 
     // ---- Heartbeat: prueba que la conexion sigue viva y mide la latencia ----
-    client.on('ping', (raw: unknown, ack?: Ack) => {
+    // FIX #2: pasa por esperarIdentidad como todos los demas handlers. Antes
+    // un socket rechazado igual recibia ok:true y podia llamar touch().
+    client.on('ping', async (raw: unknown, ack?: Ack) => {
+      if (!(await esperarIdentidad(ack))) return;
       for (const sesion of this.trackingService.getSesionesDelSocket(
         client.id,
       )) {
@@ -476,8 +499,7 @@ export class WebsocketGateway
 
   /**
    * Token bucket. Permite una rafaga corta (arranque del GPS, reconexion) pero
-   * corta a quien se dedica a inundar el socket. Vive en un Map y no en
-   * socket.data para no pelear con el tipo `any` de socket.io.
+   * corta a quien se dedica a inundar el socket.
    */
   private permitirEvento(client: Socket): boolean {
     const ahora = Date.now();
@@ -512,8 +534,7 @@ export class WebsocketGateway
 
   /**
    * Resuelve a que sesion apunta el evento: la del socket cuando no hay id, o
-   * la del id SI esa sesion pertenece a este mismo socket (evita que un socket
-   * maneje viajes ajenos).
+   * la del id SI esa sesion pertenece a este mismo socket.
    */
   private resolverSesion(
     client: Socket,
@@ -523,7 +544,6 @@ export class WebsocketGateway
       return this.trackingService.getSesionDelSocket(client.id);
     }
     const sesion = this.trackingService.getSesion(idViaje);
-    // Un id_viaje explicito solo vale si pertenece a este mismo socket.
     return sesion && sesion.socketId === client.id ? sesion : undefined;
   }
 
@@ -537,7 +557,6 @@ export class WebsocketGateway
     raw: unknown,
     client: Socket,
   ): T | null {
-    // La conversion implicita va en plainToInstance: validateSync no la acepta.
     const instancia = plainToInstance(clase, raw ?? {}, {
       enableImplicitConversion: true,
     });
@@ -559,10 +578,18 @@ export class WebsocketGateway
   }
 
   /**
-   * Traduce errores de negocio a un evento y un ack con codigo. Lo que no es
-   * una excepcion conocida se loguea como interno y se avisa generico.
+   * Traduce errores de negocio a un evento y un ack con codigo.
    */
   private responderError(client: Socket, ack: Ack | undefined, error: unknown) {
+    // FIX #8: BadRequestException tambien es validacion, no error interno.
+    if (error instanceof BadRequestException) {
+      client.emit('error:validacion', { message: error.message });
+      return ack?.({
+        ok: false,
+        code: 'validacion',
+        message: error.message,
+      });
+    }
     if (error instanceof NotFoundException) {
       client.emit('error:no_encontrado', { message: error.message });
       return ack?.({

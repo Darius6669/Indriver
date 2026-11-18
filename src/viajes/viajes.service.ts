@@ -480,6 +480,39 @@ export class ViajesService {
     return viaje;
   }
 
+
+  /**
+ * Lista los viajes cuya ruta pertenece a una cooperativa específica.
+ *
+ * @param cooperativa  Nombre o siglas de la cooperativa (ej: 'COOP-001').
+ * @param soloActivos  Si es true, solo trae viajes con fecha_final IS NULL.
+ */
+async ObtenerViajesPorCooperativa(
+  cooperativa: string,
+  soloActivos = false,
+): Promise<ViajesEntity[]> {
+  const qb = this.viajesRepository
+    .createQueryBuilder('viaje')
+    .leftJoinAndSelect('viaje.usuario', 'usuario')
+    .leftJoinAndSelect('viaje.vehiculo', 'vehiculo')
+    .leftJoinAndSelect('viaje.ruta', 'ruta')
+    .leftJoinAndSelect('ruta.cooperativa', 'cooperativa')
+    .where(
+      '(cooperativa.rif_cooperativa = :rif OR cooperativa.nombre ILIKE :nombre)',
+      {
+        rif: cooperativa,
+        nombre: `%${cooperativa}%`,
+      },
+    )
+    .orderBy('viaje.fecha_inicio', 'DESC');
+
+  if (soloActivos) {
+    qb.andWhere('viaje.fecha_final IS NULL');
+  }
+
+  return await qb.getMany();
+}
+
   /** Fuerza el cierre de un viaje atascado (solo para Admins). */
   async ForzarCierreViaje(id_viaje: number): Promise<ViajesEntity> {
     const viaje = await this.ObtenerVijesId(id_viaje);

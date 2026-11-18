@@ -217,6 +217,31 @@ export class ViajesController {
     };
   }
 
+  /**
+ * Lista los viajes de una cooperativa específica.
+ *
+ * Ej: GET /viajes/Por-Cooperativa/COOP-001
+ *     GET /viajes/Por-Cooperativa/COOP-001?soloActivos=true
+ */
+@Get('/Por-Cooperativa/:cooperativa')
+@HttpCode(HttpStatus.OK)
+async Obtener_Viajes_Por_Cooperativa(
+  @Param('cooperativa') cooperativa: string,
+  @Query('soloActivos') soloActivos?: string,
+) {
+  const viajes = await this.viajesService.ObtenerViajesPorCooperativa(
+    cooperativa,
+    soloActivos === 'true',
+  );
+  return {
+    message:
+      viajes.length === 0
+        ? `No se encontraron viajes para la cooperativa ${cooperativa}`
+        : `${viajes.length} viaje(s) encontrados para la cooperativa ${cooperativa}`,
+    control: viajes,
+  };
+}
+
    /** Fuerza el cierre de un viaje (Solo para administradores). */
   @Patch('/Forzar-Cierre/:id') // Usamos Patch porque estamos modificando algo
   @Roles(['Admin'])

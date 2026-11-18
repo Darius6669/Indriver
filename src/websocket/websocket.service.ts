@@ -47,7 +47,7 @@ const R_TIERRA_M = 6_371_000;
  * viaje_ubicacion con throttle de 30s.
  *
  * Invariante de dominio que este servicio impone: una placa no puede tener mas
- * de un viaje en curso (se comprueba en iniciarViaje).
+ * de un viaje en curso (se comprueba en iniciarViaje, en O(1) via indicePorPlaca).
  *
  * Implementa OnModuleDestroy para bajar los buffers (posiciones pendientes) al
  * apagarse el servidor.
@@ -70,11 +70,18 @@ export class WebsocketService implements OnModuleDestroy {
   private indicePorSocket = new Map<string, Set<number>>();
 
   /**
+   * FIX #6: placa -> id_viaje. Permite validar "1 viaje por placa" en O(1)
+   * en vez de recorrer todas las sesiones (que era O(n) por cada
+   * `viaje:start`). Se mantiene al dia en `registrar` y `eliminar`.
+   */
+  private indicePorPlaca = new Map<string, number>();
+
+  /**
    * Puntos que aun no se emitieron, agrupados por ruta. Es lo que permite el
    * batching: en vez de 1 mensaje por bus, 1 mensaje por ruta.
    */
   private pendientesBroadcast = new Map<string, ViajeSession[]>();
-  /** Sesiones que cambiaron y hay que refrescar en la tabla viaje. */
+  /** Sesiones que cambiaron y hay que refrescar en la tabla viaje_ubicacion. */
   private pendientesViaje = new Set<number>();
 
   /** Timer del tick (timeouts + refresco de posiciones en BD). */
@@ -127,7 +134,10 @@ export class WebsocketService implements OnModuleDestroy {
     }
     if (!this.reaperTimer) {
       // Barato: solo mira timestamps, no toca la BD.
-      this.reaperTimer = setInterval(() => this.reaper(), 60_000);
+      // FIX #7: `void` para que si reaper() llegara a rechazar, no quede como
+      // unhandled rejection. (Hoy no rechaza porque el unico await esta en
+      // try/catch, pero es defensivo y consistente con tick()).
+      this.reaperTimer = setInterval(() => void this.reaper(), 60_000);
     }
     this.logger.log(
       `Timers: broadcast ${BROADCAST_INTERVAL_MS}ms | tick ${TICK_INTERVAL_MS}ms | ` +
@@ -193,12 +203,20 @@ export class WebsocketService implements OnModuleDestroy {
     // Un recorrido a la vez por vehiculo: la placa no puede tener otro viaje
     // en curso. Hay que finalizar el anterior primero. (Un mismo conductor si
     // puede mover placas distintas; el vehiculo es la invariante real.)
-    for (const s of this.sesiones.values()) {
-      if (s.placa === dto.id_vehiculo) {
+    //
+    // FIX #6: consultar indicePorPlaca (O(1)) en vez de recorrer todas las
+    // sesiones (O(n)). Con 200 buses en vivo eran 200 iteraciones por cada
+    // `viaje:start`.
+    const ocupado = this.indicePorPlaca.get(dto.id_vehiculo);
+    if (ocupado !== undefined) {
+      const s = this.sesiones.get(ocupado);
+      if (s) {
         throw new ConflictException(
           `La placa ${dto.id_vehiculo} ya tiene el viaje ${s.id_viaje} en curso. Finalizalo primero.`,
         );
       }
+      // Indice huerfano (la sesion ya no existe): limpiar y dejar pasar.
+      this.indicePorPlaca.delete(dto.id_vehiculo);
     }
 
     const ahora = new Date();
@@ -538,7 +556,7 @@ export class WebsocketService implements OnModuleDestroy {
     await this.persistirUbicacion(sesion);
   }
 
- /**
+  /**
    * Fuga de memoria: si el chofer cierra la app a la fuerza y nunca vuelve, su
    * sesion se queda en el Map para siempre. Un viaje de mas de MAX_SESION_HORAS
    * abierto es un bug del cliente, no un caso legitimo.
@@ -551,7 +569,7 @@ export class WebsocketService implements OnModuleDestroy {
     for (const [idViaje, sesion] of [...this.sesiones]) {
       if (sesion.fechaInicio.getTime() > limite) continue;
       if (sesion.online) continue; // online: es un viaje largo de verdad
-      
+
       this.logger.warn(
         `Sesion ${idViaje} de ${sesion.username} lleva mas de ${MAX_SESION_HORAS}h offline, se descarta`,
       );
@@ -560,12 +578,12 @@ export class WebsocketService implements OnModuleDestroy {
       try {
         await this.viajesRepository.update(
           { id_viaje: idViaje },
-          { fecha_final: new Date(sesion.lastSeen) }
+          { fecha_final: new Date(sesion.lastSeen) },
         );
         this.logger.log(`Viaje zombi ${idViaje} cerrado en BD por inactividad.`);
       } catch (error) {
         this.logger.error(
-          `No se pudo cerrar el viaje zombi ${idViaje} en BD: ${(error as Error).message}`
+          `No se pudo cerrar el viaje zombi ${idViaje} en BD: ${(error as Error).message}`,
         );
       }
 
@@ -746,9 +764,11 @@ export class WebsocketService implements OnModuleDestroy {
   //  INTERNO
   // ==================================================================
 
-  /** Da de alta una sesion en los dos indices (por id y por socket). */
+  /** Da de alta una sesion en los tres indices (por id, por socket, por placa). */
   private registrar(sesion: ViajeSession) {
     this.sesiones.set(sesion.id_viaje, sesion);
+    // FIX #6: mantener al dia el indice placa -> id_viaje.
+    this.indicePorPlaca.set(sesion.placa, sesion.id_viaje);
     let ids = this.indicePorSocket.get(sesion.socketId);
     if (!ids) {
       ids = new Set<number>();
@@ -761,6 +781,25 @@ export class WebsocketService implements OnModuleDestroy {
   private eliminar(idViaje: number) {
     const sesion = this.sesiones.get(idViaje);
     if (!sesion) return;
+
+    // FIX #5: sacar la sesion de cualquier lote de broadcast pendiente.
+    // Si no, el broadcastTimer podria emitir un `viaje:ubicaciones` con este
+    // bus DESPUES del `viaje:finalizado` (punto fantasma en el mapa).
+    for (const [numeroRuta, sesiones] of this.pendientesBroadcast) {
+      const filtradas = sesiones.filter((s) => s.id_viaje !== idViaje);
+      if (filtradas.length === 0) {
+        this.pendientesBroadcast.delete(numeroRuta);
+      } else {
+        this.pendientesBroadcast.set(numeroRuta, filtradas);
+      }
+    }
+
+    // FIX #6: liberar la placa para que otro viaje pueda usarla. El guard
+    // evita borrar una entrada que ya apunte a otra sesion (defensivo).
+    if (this.indicePorPlaca.get(sesion.placa) === idViaje) {
+      this.indicePorPlaca.delete(sesion.placa);
+    }
+
     this.sesiones.delete(idViaje);
     this.pendientesViaje.delete(idViaje);
     this.desindexarSocket(sesion.socketId, idViaje);
@@ -827,7 +866,7 @@ export class WebsocketService implements OnModuleDestroy {
     );
   }
 
-   /**
+  /**
    * Fuerza la eliminación de una sesión de la memoria.
    * Lo usa el REST cuando un Admin cierra un viaje "zombi" desde el panel.
    */
@@ -836,10 +875,14 @@ export class WebsocketService implements OnModuleDestroy {
     if (!sesion) return; // Si no estaba en memoria, no hay nada que limpiar
 
     // Avisamos a las salas que el viaje murió
-    this.server?.to(roomViaje(idViaje)).emit('viaje:finalizado', { id_viaje: idViaje });
-    this.server?.to(roomRuta(sesion.numeroRuta)).emit('viaje:cerrado', { id_viaje: idViaje });
-    
-    // Lo borramos del mapa en memoria
+    this.server
+      ?.to(roomViaje(idViaje))
+      .emit('viaje:finalizado', { id_viaje: idViaje });
+    this.server
+      ?.to(roomRuta(sesion.numeroRuta))
+      .emit('viaje:cerrado', { id_viaje: idViaje });
+
+    // Lo borramos del mapa en memoria (y de los 3 índices, via eliminar)
     this.eliminar(idViaje);
     this.logger.log(`Viaje ${idViaje} forzado a cerrar desde el REST.`);
   }
