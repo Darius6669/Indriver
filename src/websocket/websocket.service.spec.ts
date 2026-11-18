@@ -280,7 +280,7 @@ describe('WebsocketService', () => {
       );
     });
 
-    it('descarta un punto que no se movio (filtro de GPS)', async () => {
+    it('descarta un punto que se movio menos de un metro', async () => {
       const sesion = await service.iniciarViaje(
         1,
         'conductor1',
@@ -290,14 +290,56 @@ describe('WebsocketService', () => {
 
       const r = service.registrarUbicacion(sesion, {
         id_viaje: 42,
-        // 2 metros: por debajo de MIN_DISTANCIA_M.
-        lat: 10.48061,
-        lng: -66.90361,
+        lat: 10.480603,
+        lng: -66.9036,
         ts: sesion.lastLocation.ts + 5000,
       });
 
       expect(r.aceptado).toBe(false);
       expect(r.motivo).toBe('sin_movimiento');
+    });
+
+    it('acepta un punto que se movio mas de un metro', async () => {
+      const sesion = await service.iniciarViaje(
+        1,
+        'conductor1',
+        'socket-1',
+        dtoA,
+      );
+
+      const r = service.registrarUbicacion(sesion, {
+        id_viaje: 42,
+        lat: 10.48061,
+        lng: -66.90361,
+        ts: sesion.lastLocation.ts + 5000,
+      });
+
+      expect(r.aceptado).toBe(true);
+    });
+
+    it('no registra ubicaciones mientras el viaje esta pausado', async () => {
+      const sesion = await service.iniciarViaje(
+        1,
+        'conductor1',
+        'socket-1',
+        dtoA,
+      );
+      service.pausarViaje(sesion);
+      const ultimaUbicacion = sesion.lastLocation;
+
+      const r = service.registrarUbicacion(sesion, {
+        id_viaje: 42,
+        lat: 10.5,
+        lng: -66.8,
+        ts: sesion.lastLocation.ts + 5000,
+      });
+
+      expect(r).toEqual({
+        aceptado: false,
+        motivo: 'viaje_pausado',
+        ts: sesion.lastLocation.ts + 5000,
+      });
+      expect(sesion.lastLocation).toBe(ultimaUbicacion);
     });
 
     it('descarta un punto disparado demasiado rapido', async () => {
@@ -622,7 +664,7 @@ describe('WebsocketService', () => {
       a.fechaInicio = new Date(Date.now() - 25 * 60 * 60 * 1000);
       emitido.length = 0;
 
-      (service as any).reaper();
+      await (service as any).reaper();
 
       expect(service.getSesion(a.id_viaje)).toBeUndefined();
       expect(emitido).toContainEqual(
@@ -674,6 +716,57 @@ describe('WebsocketService', () => {
     });
   });
 
+  describe('pausar y reanudar viaje', () => {
+    it('pausa sin cerrar ni eliminar el viaje y avisa a la ruta', async () => {
+      const sesion = await service.iniciarViaje(
+        1,
+        'conductor1',
+        'socket-1',
+        dtoA,
+      );
+      emitido.length = 0;
+
+      const viaje = service.pausarViaje(sesion);
+
+      expect(viaje.pausado).toBe(true);
+      expect(service.getSesion(42)).toBe(sesion);
+      expect(viajesRepo.update).not.toHaveBeenCalledWith(
+        { id_viaje: 42 },
+        expect.objectContaining({ fecha_final: expect.anything() }),
+      );
+      expect(emitido).toContainEqual(
+        expect.objectContaining({
+          room: 'ruta:R-01',
+          evento: 'viaje:pausado',
+          payload: expect.objectContaining({ id_viaje: 42, pausado: true }),
+        }),
+      );
+    });
+
+    it('reanuda la misma sesion y avisa a la ruta', async () => {
+      const sesion = await service.iniciarViaje(
+        1,
+        'conductor1',
+        'socket-1',
+        dtoA,
+      );
+      service.pausarViaje(sesion);
+      emitido.length = 0;
+
+      const viaje = service.reanudarViaje(sesion);
+
+      expect(viaje.pausado).toBe(false);
+      expect(service.getSesion(42)).toBe(sesion);
+      expect(emitido).toContainEqual(
+        expect.objectContaining({
+          room: 'ruta:R-01',
+          evento: 'viaje:reanudado',
+          payload: expect.objectContaining({ id_viaje: 42, pausado: false }),
+        }),
+      );
+    });
+  });
+
   describe('desconexion', () => {
     it('marca offline pero NO cierra el viaje', async () => {
       await service.iniciarViaje(1, 'conductor1', 'socket-1', dtoA);
@@ -708,6 +801,22 @@ describe('WebsocketService', () => {
       });
 
       expect(sesion.online).toBe(true);
+    });
+
+    it('una reconexion de red no reanuda un viaje pausado', async () => {
+      const sesion = await service.iniciarViaje(
+        1,
+        'conductor1',
+        'socket-1',
+        dtoA,
+      );
+      service.pausarViaje(sesion);
+      service.marcarSesionOffline('socket-1');
+
+      const resultado = service.reconectar(1, 'socket-2', sesion.id_viaje);
+
+      expect(resultado.sesion.online).toBe(true);
+      expect(resultado.sesion.pausado).toBe(true);
     });
   });
 });

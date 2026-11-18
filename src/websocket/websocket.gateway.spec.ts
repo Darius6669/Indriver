@@ -50,6 +50,8 @@ describe('WebsocketGateway', () => {
     })),
     iniciarViaje: jest.fn(),
     registrarUbicacion: jest.fn(() => ({ aceptado: true, ts: 1 })),
+    pausarViaje: jest.fn(),
+    reanudarViaje: jest.fn(),
     finalizarViaje: jest.fn(),
     marcarSesionOffline: jest.fn(() => []),
     getSesion: jest.fn(),
@@ -370,6 +372,83 @@ describe('WebsocketGateway', () => {
 
       expect(ack).toHaveBeenCalledWith(
         expect.objectContaining({ ok: false, code: 'no_encontrado' }),
+      );
+    });
+  });
+
+  describe('pausa y reanudacion manual', () => {
+    it('pausa el viaje sin llamar al cierre definitivo', async () => {
+      const sesion = {
+        id_viaje: 42,
+        socketId: 'socket-1',
+        username: 'conductor1',
+        pausado: false,
+      };
+      tracking.getSesion.mockReturnValue(sesion);
+      const client = crearSocket({ token: 'abc' });
+      await gateway.handleConnection(client as any);
+      const handler = client.on.mock.calls.find(
+        ([evento]: [string]) => evento === 'viaje:pausa',
+      )?.[1];
+      const ack = jest.fn();
+
+      await handler({ id_viaje: 42 }, ack);
+
+      expect(tracking.pausarViaje).toHaveBeenCalledWith(sesion);
+      expect(tracking.finalizarViaje).not.toHaveBeenCalled();
+      expect(ack).toHaveBeenCalledWith({
+        ok: true,
+        id_viaje: 42,
+        pausado: true,
+      });
+    });
+
+    it('reanuda el viaje existente con su mismo id', async () => {
+      const sesion = {
+        id_viaje: 42,
+        socketId: 'socket-1',
+        username: 'conductor1',
+        pausado: true,
+      };
+      tracking.getSesion.mockReturnValue(sesion);
+      const client = crearSocket({ token: 'abc' });
+      await gateway.handleConnection(client as any);
+      const handler = client.on.mock.calls.find(
+        ([evento]: [string]) => evento === 'viaje:reanudar',
+      )?.[1];
+      const ack = jest.fn();
+
+      await handler({ id_viaje: 42 }, ack);
+
+      expect(tracking.reanudarViaje).toHaveBeenCalledWith(sesion);
+      expect(tracking.iniciarViaje).not.toHaveBeenCalled();
+      expect(ack).toHaveBeenCalledWith({
+        ok: true,
+        id_viaje: 42,
+        pausado: false,
+      });
+    });
+
+    it('rechaza ubicaciones mientras el viaje esta pausado', async () => {
+      const sesion = {
+        id_viaje: 42,
+        socketId: 'socket-1',
+        username: 'conductor1',
+        pausado: true,
+      };
+      tracking.getSesion.mockReturnValue(sesion);
+      const client = crearSocket({ token: 'abc' });
+      await gateway.handleConnection(client as any);
+      const handler = client.on.mock.calls.find(
+        ([evento]: [string]) => evento === 'viaje:ubicacion',
+      )?.[1];
+      const ack = jest.fn();
+
+      await handler({ id_viaje: 42, lat: 10.5, lng: -66.8 }, ack);
+
+      expect(tracking.registrarUbicacion).not.toHaveBeenCalled();
+      expect(ack).toHaveBeenCalledWith(
+        expect.objectContaining({ ok: false, code: 'viaje_pausado' }),
       );
     });
   });

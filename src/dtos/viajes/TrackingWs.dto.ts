@@ -102,7 +102,7 @@ export class UbicacionWsDto {
   ts?: number;
 }
 
-/** Payload de `viaje:finalizar` / `viaje:pausa`. */
+/** Payload de `viaje:finalizar`. */
 export class CerrarViajeWsDto {
   /** Viaje que se finaliza o pausa. */
   @IsInt()
@@ -115,13 +115,18 @@ export class CerrarViajeWsDto {
   fecha_final?: Date;
 }
 
-/** Payload de `viaje:reconectar` — el telefono vuelve y retoma su viaje. */
-export class ReconectarViajeWsDto {
-  /** Viaje que el conductor retoma tras reconectar. */
+/** Payload de eventos que identifican un viaje existente. */
+export class ViajeIdWsDto {
   @IsInt()
   @IsNotEmpty()
   id_viaje!: number;
 }
+
+/** Payload de `viaje:reconectar` — el telefono vuelve tras perder la red. */
+export class ReconectarViajeWsDto extends ViajeIdWsDto {}
+
+/** Payload de `viaje:pausa` — detener temporalmente el envio de GPS. */
+export class PausarViajeWsDto extends ViajeIdWsDto {}
 
 /** Payload de `suscribir:ruta` — el pasajero dice que ruta quiere mirar. */
 export class SuscribirRutaWsDto {

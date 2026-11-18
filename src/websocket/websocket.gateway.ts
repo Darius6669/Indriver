@@ -22,9 +22,11 @@ import { UsuariosEntity } from 'src/entidades/Usuarios.entity';
 import {
   CerrarViajeWsDto,
   IniciarViajeWsDto,
+  PausarViajeWsDto,
   ReconectarViajeWsDto,
   SuscribirRutaWsDto,
   UbicacionWsDto,
+  ViajeIdWsDto,
 } from 'src/dtos/viajes/TrackingWs.dto';
 import { WebsocketService } from './websocket.service';
 import {
@@ -352,6 +354,13 @@ export class WebsocketGateway
           message: 'No tenes un viaje abierto. Manda viaje:start primero.',
         });
       }
+      if (sesion.pausado) {
+        return ack?.({
+          ok: false,
+          code: 'viaje_pausado',
+          message: 'El viaje esta pausado. Reanudalo antes de enviar ubicaciones.',
+        });
+      }
 
       const resultado = this.trackingService.registrarUbicacion(sesion, dto);
       // Un punto filtrado no es un error: se confirma igual para que el
@@ -398,7 +407,67 @@ export class WebsocketGateway
       }
     });
 
-    // ---- Pausa / cierre ----
+    // ---- Pausa temporal ----
+    client.on('viaje:pausa', async (raw: unknown, ack?: Ack) => {
+      const identidad = await esperarIdentidad(ack);
+      if (!identidad) return;
+      if (!exigirConductor(identidad, ack)) return;
+      if (cortarPorRate(ack)) return;
+
+      const dto = this.validar(PausarViajeWsDto, raw, client);
+      if (!dto) return ack?.({ ok: false, code: 'validacion' });
+
+      const sesion = this.resolverSesion(client, dto.id_viaje);
+      if (!sesion) {
+        return ack?.({
+          ok: false,
+          code: 'sin_viaje_activo',
+          message: 'No tenes un viaje abierto.',
+        });
+      }
+      if (sesion.username !== identidad.username) {
+        return ack?.({
+          ok: false,
+          code: 'viaje_ajeno',
+          message: 'Ese viaje pertenece a otro conductor.',
+        });
+      }
+
+      this.trackingService.pausarViaje(sesion);
+      ack?.({ ok: true, id_viaje: sesion.id_viaje, pausado: true });
+    });
+
+    // ---- Reanudacion manual del mismo viaje ----
+    client.on('viaje:reanudar', async (raw: unknown, ack?: Ack) => {
+      const identidad = await esperarIdentidad(ack);
+      if (!identidad) return;
+      if (!exigirConductor(identidad, ack)) return;
+      if (cortarPorRate(ack)) return;
+
+      const dto = this.validar(ViajeIdWsDto, raw, client);
+      if (!dto) return ack?.({ ok: false, code: 'validacion' });
+
+      const sesion = this.resolverSesion(client, dto.id_viaje);
+      if (!sesion) {
+        return ack?.({
+          ok: false,
+          code: 'sin_viaje_activo',
+          message: 'No tenes un viaje abierto.',
+        });
+      }
+      if (sesion.username !== identidad.username) {
+        return ack?.({
+          ok: false,
+          code: 'viaje_ajeno',
+          message: 'Ese viaje pertenece a otro conductor.',
+        });
+      }
+
+      this.trackingService.reanudarViaje(sesion);
+      ack?.({ ok: true, id_viaje: sesion.id_viaje, pausado: false });
+    });
+
+    // ---- Cierre definitivo ----
     const cerrar = async (raw: unknown, ack?: Ack) => {
       const identidad = await esperarIdentidad(ack);
       if (!identidad) return;
@@ -435,7 +504,6 @@ export class WebsocketGateway
       }
     };
 
-    client.on('viaje:pausa', cerrar);
     client.on('viaje:finalizar', cerrar);
 
     // ---- Suscripcion de rutas (lado observador) ----

@@ -243,6 +243,7 @@ export class WebsocketService implements OnModuleDestroy {
       pendingDbUpdate: false,
       lastSeen: Date.now(),
       online: true,
+      pausado: false,
     };
 
     this.registrar(sesion);
@@ -261,6 +262,36 @@ export class WebsocketService implements OnModuleDestroy {
       .emit('viaje:disponible', this.aPublica(sesion));
 
     return sesion;
+  }
+
+  /** Pausa el envio de GPS sin cerrar ni eliminar el viaje. */
+  pausarViaje(sesion: ViajeSession): ViajePublico {
+    if (sesion.pausado) return this.aPublica(sesion);
+
+    sesion.pausado = true;
+    const payload = this.aPublica(sesion);
+    this.server
+      ?.to(roomRuta(sesion.numeroRuta))
+      .emit('viaje:pausado', payload);
+    this.logger.log(`Viaje ${sesion.id_viaje} pausado por ${sesion.username}`);
+    return payload;
+  }
+
+  /** Reanuda el mismo viaje y notifica a los observadores de su ruta. */
+  reanudarViaje(sesion: ViajeSession): ViajePublico {
+    if (!sesion.pausado) return this.aPublica(sesion);
+
+    sesion.pausado = false;
+    sesion.online = true;
+    sesion.lastSeen = Date.now();
+    this.encolarBroadcast(sesion);
+
+    const payload = this.aPublica(sesion);
+    this.server
+      ?.to(roomRuta(sesion.numeroRuta))
+      .emit('viaje:reanudado', payload);
+    this.logger.log(`Viaje ${sesion.id_viaje} reanudado por ${sesion.username}`);
+    return payload;
   }
 
   /**
@@ -344,6 +375,14 @@ export class WebsocketService implements OnModuleDestroy {
     sesion: ViajeSession,
     dto: UbicacionWsDto,
   ): { aceptado: boolean; motivo?: string; ts: number } {
+    if (sesion.pausado) {
+      return {
+        aceptado: false,
+        motivo: 'viaje_pausado',
+        ts: dto.ts ?? Date.now(),
+      };
+    }
+
     if (!sesion.online) {
       sesion.online = true;
       this.sesionVolvio(sesion);
@@ -755,6 +794,7 @@ export class WebsocketService implements OnModuleDestroy {
       numero_ruta: sesion.numeroRuta,
       cooperativa: sesion.cooperativa,
       online: sesion.online,
+      pausado: sesion.pausado,
       fecha_inicio: sesion.fechaInicio.toISOString(),
       ultima_ubicacion: this.aPunto(sesion),
     };

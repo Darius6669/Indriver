@@ -24,7 +24,7 @@ export interface PuntoUbicacion {
 export interface ViajeSession {
   /** id del viaje en BD. Es la clave del Map de sesiones. */
   id_viaje: number;
-  /** Socket conectado que esta publicando la posicion de esta sesion. */
+  /** Socket actualmente asociado a esta sesion. */
   socketId: string;
   /** user_id del conductor (se usa para validar pertenencia). */
   userId: number;
@@ -46,8 +46,10 @@ export interface ViajeSession {
   pendingDbUpdate: boolean;
   /** Ultima actividad (ping o posicion); alimenta al timeout de sesion. */
   lastSeen: number;
-  /** true = el telefono esta conectado y reportando. */
+  /** true = el socket del telefono sigue conectado. */
   online: boolean;
+  /** true = el conductor pauso la transmision sin cerrar el viaje. */
+  pausado: boolean;
 }
 
 /**
@@ -65,8 +67,10 @@ export interface ViajePublico {
   numero_ruta: string;
   /** RIF de la cooperativa (vacio si no tiene). */
   cooperativa: string;
-  /** true si el telefono esta conectado y reportando. */
+  /** true si el socket del telefono sigue conectado. */
   online: boolean;
+  /** true si el conductor pauso la transmision sin cerrar el viaje. */
+  pausado: boolean;
   /** Fecha de inicio del viaje, ya serializada en ISO. */
   fecha_inicio: string;
   /** Ultimo punto conocido: el "hot payload" que se emite a cada ciclo. */
@@ -120,7 +124,7 @@ export const DB_UPDATE_INTERVAL_MS = 30_000;
  * Distancia minima entre dos puntos para considerarlos del mismo lugar. El GPS
  * del telefono vibra y manda valores casi identicos varias veces por segundo.
  */
-export const MIN_DISTANCIA_M = 10;
+export const MIN_DISTANCIA_M = 1;
 
 /** Dos puntos con menos de esto de diferencia se consideran el mismo fix. */
 export const MIN_INTERVAL_PUNTO_MS = 1_000;

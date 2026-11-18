@@ -31,8 +31,9 @@ Todos aceptan un **ack** opcional (callback) que responde `{ ok, ... }`.
 | --- | --- | --- | --- |
 | `viaje:start` | `IniciarViajeWsDto` | Conductor | Enciende un viaje ya creado por el REST (reutiliza `id_viaje`). Ack: `{ ok, id_viaje, numero_ruta, placa, fecha_inicio }`. |
 | `viaje:ubicacion` | `UbicacionWsDto` | Conductor | Empuja una posición GPS. Ack: `{ ok, aceptado, motivo, id_viaje }`. |
-| `viaje:reconectar` | `ReconectarViajeWsDto` | Conductor | Retoma un viaje tras caída de red. |
-| `viaje:pausa` | `CerrarViajeWsDto` | Conductor | Cierra el viaje (mismo handler que `viaje:finalizar`). |
+| `viaje:reconectar` | `ReconectarViajeWsDto` | Conductor | Recupera la sesión tras una caída de red; conserva si estaba pausada. |
+| `viaje:pausa` | `PausarViajeWsDto` | Conductor | Detiene temporalmente el GPS sin finalizar el viaje. Ack: `{ ok, id_viaje, pausado: true }`. |
+| `viaje:reanudar` | `ViajeIdWsDto` | Conductor | Reanuda el mismo viaje pausado. Ack: `{ ok, id_viaje, pausado: false }`. |
 | `viaje:finalizar` | `CerrarViajeWsDto` | Conductor | Cierra el viaje. |
 | `suscribir:ruta` | `SuscribirRutaWsDto` | Cualquiera | Entra a la room de la ruta y recibe un snapshot. |
 | `desuscribir:ruta` | `SuscribirRutaWsDto` | Cualquiera | Sale de la room. |
@@ -41,7 +42,11 @@ Todos aceptan un **ack** opcional (callback) que responde `{ ok, ... }`.
 
 Comportamiento de `viaje:ubicacion`:
 - **Rate limit** token bucket por socket: `RATE_LIMIT_POR_SEGUNDO=30`, ráfaga `60`. Excedido ⇒ ack `{ ok:false, code:'rate_limit' }` (no desconecta).
-- Un punto **filtrado** (sin movimiento o demasiado seguido) no es error: ack `{ ok:true, aceptado:false, motivo }`.
+- Un punto que se movió menos de **1 metro** o llega con menos de 1 segundo de diferencia se filtra: ack `{ ok:true, aceptado:false, motivo }`.
+- Mientras el viaje está pausado, las ubicaciones se rechazan con ack `{ ok:false, code:'viaje_pausado' }`.
+- `online` indica que el socket sigue conectado; `pausado` indica que el conductor detuvo el GPS. La app puede seguir enviando `ping` durante la pausa para conservar `online=true`.
+
+Flujo del conductor: la interfaz administrativa crea/asigna el viaje y la app conserva su `id_viaje`; `viaje:start` inicia el tracking, `viaje:pausa` lo detiene sin cerrar, `viaje:reanudar` continúa ese mismo ID y solo `viaje:finalizar` establece `fecha_final` y elimina la sesión.
 
 ## Eventos servidor → cliente
 
@@ -50,6 +55,7 @@ Comportamiento de `viaje:ubicacion`:
 | `conexion:lista` | Identidad + `viajes_activos` (snapshot). |
 | `viaje:iniciado` / `viaje:reconectado` | `{ id_viaje, numero_ruta, placa, fecha_inicio }`. |
 | `viaje:disponible` | A la room de la ruta cuando un bus arranca. |
+| `viaje:pausado` / `viaje:reanudado` | Snapshot público del viaje, incluyendo `pausado`. |
 | `viaje:ubicaciones` | **Batch** por ruta: `{ buses: [{ id_viaje, lat, lng, velocidad, rumbo, precision, ts }] }`. |
 | `viaje:ubicacion` | Punto individual a las rooms chicas (viaje/conductor). |
 | `viaje:finalizado` / `viaje:cerrado` | `ViajeFinalizado` (incluye `ultima_ubicacion`, `duracionMs`). |
@@ -67,15 +73,16 @@ Todo sale del viaje (no hay columnas nuevas):
 `WebsocketService` guarda `Map<id_viaje, ViajeSession>`. La clave es `id_viaje`;
 el identificador real del bus es la **placa**.
 
-`ViajeSession` incluye: `lastLocation` (`PuntoUbicacion`), `online`,
+`ViajeSession` incluye: `lastLocation` (`PuntoUbicacion`), `online`, `pausado`,
 `pendingDbUpdate`, `lastDbUpdateAt`, `lastSeen`, etc.
 
 Ciclo de vida:
 - `iniciarViaje`: valida dueño/ruta/placa, bloquea 2º viaje de la misma placa, crea la sesión y **siembra `viaje_ubicacion`** (UPSERT).
-- `registrarUbicacion`: filtra GPS (min 10 m / min 1 s), actualiza memoria y encola el batch de difusión + el refresco a BD (`pendingDbUpdate`).
+- `pausarViaje` / `reanudarViaje`: cambian el estado de transmisión sin finalizar el registro ni eliminar la sesión.
+- `registrarUbicacion`: no acepta GPS durante la pausa; fuera de ella filtra puntos menores a 1 m o con menos de 1 s de diferencia, y encola difusión + refresco de BD (`pendingDbUpdate`).
 - `finalizarViaje`: persiste la última posición, setea `fecha_final` y elimina la sesión.
 - `marcarSesionOffline`: al desconectar **NO cierra el viaje**, solo marca `online=false`.
-- `reconectar` / `reaper`: retoma viajes o descarta sesiones viejas (>24h offline).
+- `reconectar` / `reaper`: recupera sesiones conservando el estado de pausa o descarta sesiones viejas (>24h offline).
 
 ## Persistencia de posiciones
 
@@ -91,7 +98,7 @@ Ciclo de vida:
 | `BROADCAST_INTERVAL_MS` (`WS_BROADCAST_MS`) | 3000 | Agrupa posiciones y difunde 1 mensaje por ruta. |
 | `TICK_INTERVAL_MS` | 10000 | Tick interno. |
 | `DB_UPDATE_INTERVAL_MS` | 30000 | Throttle del UPSERT a `viaje_ubicacion`. |
-| `MIN_DISTANCIA_M` | 10 | Filtro de ruido del GPS. |
+| `MIN_DISTANCIA_M` | 1 | Filtro de ruido del GPS. |
 | `MIN_INTERVAL_PUNTO_MS` | 1000 | Mínimo entre dos fixes. |
 | `SESION_TIMEOUT_MS` | 45000 | Sin ping ⇒ offline. |
 | `MAX_SESION_HORAS` | 24 | Offline más tiempo ⇒ se descarta. |

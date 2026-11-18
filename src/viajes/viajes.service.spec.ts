@@ -89,6 +89,15 @@ describe('ViajesService', () => {
     expect(service).toBeDefined();
   });
 
+  describe('ObtenerViajesPorCooperativa', () => {
+    it('filtra viajes finalizados cuando soloActivos es true', async () => {
+      await service.ObtenerViajesPorCooperativa('J-12345678-1', true);
+
+      const qb = viajesRepo.createQueryBuilder.mock.results[0].value;
+      expect(qb.andWhere).toHaveBeenCalledWith('viaje.fecha_final IS NULL');
+    });
+  });
+
   describe('ObtenerUltimaUbicacion', () => {
     it('usa la posicion de viaje_ubicacion y marca en_curso', async () => {
       viajesRepo.findOne.mockResolvedValueOnce({
