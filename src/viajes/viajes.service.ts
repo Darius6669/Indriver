@@ -510,7 +510,26 @@ async ObtenerViajesPorCooperativa(
     qb.andWhere('viaje.fecha_final IS NULL');
   }
 
-  return await qb.getMany();
+  const viajes = await qb.getMany();
+
+  if (!soloActivos) return viajes;
+
+  return await Promise.all(
+    viajes.map(async (viaje) => {
+      const ubicacion = await this.ubicacionesRepository.findOne({
+        where: { id_viaje: viaje.id_viaje },
+      });
+
+      return Object.assign(viaje, {
+        lactitud: ubicacion?.lactitud ?? viaje.lactitud,
+        longitud: ubicacion?.longitud ?? viaje.longitud,
+        velocidad: ubicacion?.velocidad ?? null,
+        rumbo: ubicacion?.rumbo ?? null,
+        precision: ubicacion?.precision ?? null,
+        recorded_at: ubicacion?.recorded_at ?? null,
+      });
+    }),
+  );
 }
 
   /** Fuerza el cierre de un viaje atascado (solo para Admins). */

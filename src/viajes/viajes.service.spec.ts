@@ -96,6 +96,76 @@ describe('ViajesService', () => {
       const qb = viajesRepo.createQueryBuilder.mock.results[0].value;
       expect(qb.andWhere).toHaveBeenCalledWith('viaje.fecha_final IS NULL');
     });
+
+    it('sustituye las coordenadas iniciales por la ultima ubicacion', async () => {
+      const recordedAt = new Date('2026-11-18T16:20:00.000Z');
+      const viaje = {
+        id_viaje: 94,
+        lactitud: 11.0333,
+        longitud: -63.8617,
+      };
+      const qb = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([viaje]),
+      };
+      viajesRepo.createQueryBuilder.mockReturnValueOnce(qb);
+      ubicacionesRepo.findOne.mockResolvedValueOnce({
+        lactitud: 11.0341,
+        longitud: -63.8622,
+        velocidad: 42,
+        rumbo: 95,
+        precision: 7,
+        recorded_at: recordedAt,
+      });
+
+      const [resultado] = await service.ObtenerViajesPorCooperativa(
+        'J-12345678-1',
+        true,
+      );
+
+      expect(resultado).toEqual(expect.objectContaining({
+        lactitud: 11.0341,
+        longitud: -63.8622,
+        velocidad: 42,
+        rumbo: 95,
+        precision: 7,
+        recorded_at: recordedAt,
+      }));
+    });
+
+    it('conserva las coordenadas del viaje si no existe viaje_ubicacion', async () => {
+      const viaje = {
+        id_viaje: 95,
+        lactitud: 10.48,
+        longitud: -66.90,
+      };
+      const qb = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([viaje]),
+      };
+      viajesRepo.createQueryBuilder.mockReturnValueOnce(qb);
+      ubicacionesRepo.findOne.mockResolvedValueOnce(null);
+
+      const [resultado] = await service.ObtenerViajesPorCooperativa(
+        'J-12345678-1',
+        true,
+      );
+
+      expect(resultado).toEqual(expect.objectContaining({
+        lactitud: 10.48,
+        longitud: -66.90,
+        velocidad: null,
+        rumbo: null,
+        precision: null,
+        recorded_at: null,
+      }));
+    });
   });
 
   describe('ObtenerUltimaUbicacion', () => {
