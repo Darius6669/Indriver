@@ -260,6 +260,19 @@ async Obtener_Viajes_Activos_Por_Cooperativa(
   };
 }
 
+@Get('/Obtener-viajes-activos/Por-Ruta/:ruta')
+@HttpCode(HttpStatus.OK)
+async Obtener_Viajes_Activos_Por_Ruta(@Param('ruta') ruta: string) {
+  const viajes = await this.viajesService.ObtenerViajesActivosPorRuta(ruta);
+  return {
+    message:
+      viajes.length === 0
+        ? `No se encontraron viajes activos para la ruta ${ruta}`
+        : `${viajes.length} viaje(s) activo(s) encontrados para la ruta ${ruta}`,
+    control: viajes,
+  };
+}
+
    /** Fuerza el cierre de un viaje (Solo para administradores). */
   @Patch('/Forzar-Cierre/:id') // Usamos Patch porque estamos modificando algo
   @Roles(['Admin'])

@@ -82,6 +82,15 @@ export class RutasService {
     return this.rutaRepository.find({ relations: ['cooperativa'] });
   }
 
+  async obtenerRutasPorCooperativa(
+    cooperativaId: string,
+  ): Promise<RutaEntity[]> {
+    return this.rutaRepository.find({
+      where: { cooperativa: { rif_cooperativa: cooperativaId } },
+      relations: ['cooperativa'],
+    });
+  }
+
   async obtenerRutaPorId(numero_ruta: string): Promise<RutaEntity[]> {
     const ruta = await this.rutaRepository.find({
       where: { numero_ruta },

@@ -34,6 +34,14 @@ export class RutasController {
     return this.rutasService.obtenerrutas();
   }
 
+  @Get('destino/obtener/cooperativa/:cooperativaId')
+  @HttpCode(HttpStatus.OK)
+  async obtenerRutasPorCooperativa(
+    @Param('cooperativaId') cooperativaId: string,
+  ) {
+    return this.rutasService.obtenerRutasPorCooperativa(cooperativaId);
+  }
+
   @Get('destino/filter/:numero_ruta')
   @HttpCode(HttpStatus.OK)
   async obtenerRutaPorId(@Param('numero_ruta') numero_ruta: string) {

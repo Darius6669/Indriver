@@ -168,6 +168,54 @@ describe('ViajesService', () => {
     });
   });
 
+  describe('ObtenerViajesActivosPorRuta', () => {
+    it('filtra viajes activos por id o nombre de ruta y agrega la ultima ubicacion', async () => {
+      const ubicacion = {
+        lactitud: 10.51,
+        longitud: -66.91,
+        velocidad: 35,
+        rumbo: 80,
+        precision: 6,
+        recorded_at: new Date('2026-11-18T16:20:00.000Z'),
+      };
+      const viaje = {
+        id_viaje: 96,
+        lactitud: 10.5,
+        longitud: -66.9,
+      };
+      const qb = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([viaje]),
+      };
+      viajesRepo.createQueryBuilder.mockReturnValueOnce(qb);
+      ubicacionesRepo.findOne.mockResolvedValueOnce(ubicacion);
+
+      const resultado = await service.ObtenerViajesActivosPorRuta('Ruta Norte');
+
+      expect(qb.where).toHaveBeenCalledWith(
+        '(ruta.id = :idRuta OR ruta.numero_ruta = :numeroRuta OR LOWER(ruta.nombre) = LOWER(:nombre))',
+        { idRuta: null, numeroRuta: 'Ruta Norte', nombre: 'Ruta Norte' },
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'viaje.fecha_final IS NULL',
+      );
+      expect(resultado[0]).toEqual(expect.objectContaining(ubicacion));
+    });
+
+    it('usa el valor numerico de ruta como id y como numero de ruta', async () => {
+      await service.ObtenerViajesActivosPorRuta('12');
+
+      const qb = viajesRepo.createQueryBuilder.mock.results[0].value;
+      expect(qb.where).toHaveBeenCalledWith(
+        expect.any(String),
+        { idRuta: 12, numeroRuta: '12', nombre: '12' },
+      );
+    });
+  });
+
   describe('ObtenerUltimaUbicacion', () => {
     it('usa la posicion de viaje_ubicacion y marca en_curso', async () => {
       viajesRepo.findOne.mockResolvedValueOnce({

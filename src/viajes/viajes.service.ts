@@ -532,6 +532,43 @@ async ObtenerViajesPorCooperativa(
   );
 }
 
+async ObtenerViajesActivosPorRuta(ruta: string): Promise<ViajesEntity[]> {
+  const idRuta = /^\d+$/.test(ruta) ? Number(ruta) : null;
+  const viajes = await this.viajesRepository
+    .createQueryBuilder('viaje')
+    .leftJoinAndSelect('viaje.usuario', 'usuario')
+    .leftJoinAndSelect('viaje.vehiculo', 'vehiculo')
+    .leftJoinAndSelect('viaje.ruta', 'ruta')
+    .where(
+      '(ruta.id = :idRuta OR ruta.numero_ruta = :numeroRuta OR LOWER(ruta.nombre) = LOWER(:nombre))',
+      {
+        idRuta: Number.isSafeInteger(idRuta) ? idRuta : null,
+        numeroRuta: ruta,
+        nombre: ruta,
+      },
+    )
+    .andWhere('viaje.fecha_final IS NULL')
+    .orderBy('viaje.fecha_inicio', 'DESC')
+    .getMany();
+
+  return await Promise.all(
+    viajes.map(async (viaje) => {
+      const ubicacion = await this.ubicacionesRepository.findOne({
+        where: { id_viaje: viaje.id_viaje },
+      });
+
+      return Object.assign(viaje, {
+        lactitud: ubicacion?.lactitud ?? viaje.lactitud,
+        longitud: ubicacion?.longitud ?? viaje.longitud,
+        velocidad: ubicacion?.velocidad ?? null,
+        rumbo: ubicacion?.rumbo ?? null,
+        precision: ubicacion?.precision ?? null,
+        recorded_at: ubicacion?.recorded_at ?? null,
+      });
+    }),
+  );
+}
+
   /** Fuerza el cierre de un viaje atascado (solo para Admins). */
   async ForzarCierreViaje(id_viaje: number): Promise<ViajesEntity> {
     const viaje = await this.ObtenerVijesId(id_viaje);
